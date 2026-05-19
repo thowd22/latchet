@@ -35,6 +35,20 @@ pass before implementation.
 - **Workspace retention sweeper** — auto-clean old run directories from temp.
 - **CLI flags** — `validate-only`, `dry-run`, and a real argument parser (v1
   takes no args).
+- **Automated installation scripts** — one-line installers that fetch the
+  right prebuilt binary and put it on `PATH`:
+  - **Linux** — `install.sh` (curl-pipe friendly); detect arch (amd64/arm64).
+  - **macOS** — `install.sh` covering Intel and Apple Silicon; consider a
+    Homebrew formula/tap as a follow-up.
+  - **Windows** — `install.ps1` for PowerShell.
+  Requires tagged releases with published binaries (e.g. via CI) for the
+  scripts to download.
+- **Global `latchet-ci.yml` config** — a machine-wide config file (separate
+  from the per-project workflow `latchet.yml`) for user defaults: preferred
+  container runtime, workspace root, default env, log verbosity. Loaded from a
+  standard location (`$XDG_CONFIG_HOME/latchet/latchet-ci.yml`, `~/.config/...`,
+  or `%APPDATA%` on Windows) and overridden by per-project settings and
+  environment variables.
 
 ## Suggested ordering
 
