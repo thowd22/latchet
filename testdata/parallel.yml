@@ -1,0 +1,17 @@
+name: parallel-demo
+# Three independent jobs that each sleep ~3 seconds. With max-parallel=1
+# the run takes ~9s of sleep; with max-parallel=3 it takes ~3s. The
+# parallel integration test asserts the speedup.
+jobs:
+  alpha:
+    container: alpine:3.19
+    steps:
+      - run: sleep 3
+  beta:
+    container: alpine:3.19
+    steps:
+      - run: sleep 3
+  gamma:
+    container: alpine:3.19
+    steps:
+      - run: sleep 3

@@ -1,19 +1,22 @@
 // Package engine orchestrates a workflow run: it loads and validates the
-// config, orders jobs by their dependencies, executes each job inside a
-// container, and reports results.
+// config, builds the dependency graph, and hands every job to the
+// scheduler. Each job runs inside its own container; the scheduler enforces
+// dependency order and concurrency limits.
 package engine
 
 import (
 	"context"
 	"fmt"
-	"os"
+	"io"
 	"time"
 
 	"github.com/thowd22/latchet/internal/config"
 	"github.com/thowd22/latchet/internal/dag"
 	"github.com/thowd22/latchet/internal/envutil"
 	"github.com/thowd22/latchet/internal/log"
+	"github.com/thowd22/latchet/internal/logstore"
 	"github.com/thowd22/latchet/internal/runtime"
+	"github.com/thowd22/latchet/internal/scheduler"
 	"github.com/thowd22/latchet/internal/workspace"
 )
 
@@ -25,123 +28,142 @@ const (
 	ExitInfra   = 3 // a container/runtime/workspace operation failed
 )
 
-// Run executes the workflow at workflowPath and returns a process exit code.
-func Run(workflowPath string) int {
-	wf, err := config.Load(workflowPath)
+// Run executes the workflow described by opts and returns a process exit code.
+func Run(opts Options) int {
+	opts = opts.resolve()
+
+	wf, err := loadAndValidate(opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "latchet: %v\n", err)
-		return ExitConfig
-	}
-	if err := wf.Validate(); err != nil {
-		fmt.Fprintf(os.Stderr, "latchet: %v\n", err)
 		return ExitConfig
 	}
 
 	rt, err := runtime.Detect()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "latchet: %v\n", err)
+		fmt.Fprintf(opts.Stderr, "latchet: %v\n", err)
 		return ExitInfra
 	}
 
 	// Validate already proved the graph is acyclic, so this cannot fail.
-	order, err := dag.Sort(wf.Deps())
+	g, err := dag.Build(wf.Deps())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "latchet: %v\n", err)
+		fmt.Fprintf(opts.Stderr, "latchet: %v\n", err)
 		return ExitConfig
 	}
 
 	ws, err := workspace.New()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "latchet: %v\n", err)
+		fmt.Fprintf(opts.Stderr, "latchet: %v\n", err)
 		return ExitInfra
 	}
 
-	ctx := context.Background()
-	out := os.Stdout
+	ls, err := logstore.New(ws.ID)
+	if err != nil {
+		fmt.Fprintf(opts.Stderr, "latchet: %v\n", err)
+		return ExitInfra
+	}
 
 	name := wf.Name
 	if name == "" {
 		name = "(unnamed)"
 	}
-	fmt.Fprintf(out, "latchet: workflow %s — using %s — run %s\n", name, rt.Bin, ws.ID)
+	fmt.Fprintf(opts.Stdout, "latchet: workflow %s — using %s — run %s\n", name, rt.Bin, ws.ID)
+	fmt.Fprintf(opts.Stdout, "latchet: logs at %s\n", ls.Dir)
 
-	results := make(map[string]*JobResult, len(order))
-	pulled := make(map[string]bool)
+	images := newImageCache()
+	maxParallel := opts.MaxParallel
+	if maxParallel < 1 {
+		maxParallel = 1
+	}
 
-	for _, id := range order {
-		job := wf.Jobs[id]
+	results, infraErr := scheduler.Run(context.Background(), g, scheduler.Options{
+		MaxParallel: maxParallel,
+		RunJob: func(ctx context.Context, jobID string) (scheduler.Result, error) {
+			return runOne(ctx, rt, ws, ls, wf, jobID, images, opts.Stdout, maxParallel)
+		},
+		OnSkip: func(jobID, reason string) {
+			log.JobSkip(opts.Stdout, jobID, reason)
+		},
+	})
 
-		if reason, skip := skipReason(job, results); skip {
-			results[id] = &JobResult{ID: id, Status: StatusSkipped, Detail: reason}
-			log.JobSkip(out, id, reason)
-			continue
+	if infraErr != nil {
+		fmt.Fprintf(opts.Stderr, "latchet: %v\n", infraErr)
+		if kept := ws.Cleanup(true); kept != "" {
+			fmt.Fprintf(opts.Stderr, "latchet: workspace kept at %s\n", kept)
 		}
-
-		res, infraErr := runJob(ctx, rt, ws, wf, job, pulled)
-		if infraErr != nil {
-			fmt.Fprintf(os.Stderr, "latchet: %v\n", infraErr)
-			if kept := ws.Cleanup(true); kept != "" {
-				fmt.Fprintf(os.Stderr, "latchet: workspace kept at %s\n", kept)
-			}
-			return ExitInfra
-		}
-		results[id] = res
+		return ExitInfra
 	}
 
 	exit := ExitSuccess
 	for _, r := range results {
-		if r.Status == StatusFailed {
+		if r.Status == scheduler.StatusFailed {
 			exit = ExitFailed
 			break
 		}
 	}
 
-	log.SummaryHeader(out)
-	for _, id := range order {
-		log.SummaryLine(out, id, string(results[id].Status))
+	log.SummaryHeader(opts.Stdout)
+	for _, id := range g.Order {
+		log.SummaryLine(opts.Stdout, id, string(results[id].Status))
 	}
 
 	if kept := ws.Cleanup(exit != ExitSuccess); kept != "" {
-		fmt.Fprintf(out, "\nworkspace kept at %s\n", kept)
+		fmt.Fprintf(opts.Stdout, "\nworkspace kept at %s\n", kept)
 	}
 	return exit
 }
 
-// skipReason reports whether a job must be skipped because one of the jobs it
-// needs did not succeed. Topological ordering guarantees every dependency has
-// a recorded result by the time this is called.
-func skipReason(job *config.Job, results map[string]*JobResult) (string, bool) {
-	for _, need := range job.Needs {
-		if dep := results[need]; dep != nil && dep.Status != StatusSuccess {
-			return fmt.Sprintf("%s %s", need, dep.Status), true
+// runOne wraps runJob with the per-job log file setup. The log file always
+// records the full output; for maxParallel == 1 it is teed to stdout so the
+// user sees streaming output (matching v1's UX). For maxParallel > 1, stdout
+// gets only terse begin/end markers, since interleaving live step output
+// from concurrent jobs is unreadable.
+func runOne(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, ls *logstore.Run, wf *config.Workflow, jobID string, images *imageCache, stdout io.Writer, maxParallel int) (scheduler.Result, error) {
+	logFile, logPath, err := ls.OpenJob(jobID)
+	if err != nil {
+		return scheduler.Result{ID: jobID}, err
+	}
+	defer logFile.Close()
+
+	var stepW io.Writer = logFile
+	if maxParallel == 1 {
+		stepW = io.MultiWriter(logFile, stdout)
+	} else {
+		fmt.Fprintf(stdout, "\n== job: %s started (log: %s) ==\n", jobID, logPath)
+	}
+
+	res, err := runJob(ctx, rt, ws, wf, wf.Jobs[jobID], images, stepW)
+	if maxParallel > 1 {
+		switch {
+		case err != nil:
+			fmt.Fprintf(stdout, "== job: %s -> infra error ==\n", jobID)
+		case res.Status == scheduler.StatusFailed:
+			fmt.Fprintf(stdout, "== job: %s -> failed (%s) ==\n", jobID, res.Detail)
+		default:
+			fmt.Fprintf(stdout, "== job: %s -> %s ==\n", jobID, res.Status)
 		}
 	}
-	return "", false
+	return res, err
 }
 
 // runJob executes one job inside a freshly created container. A non-nil error
-// signals an infrastructure failure that should abort the whole run; a step
-// exiting non-zero is reported through JobResult instead.
-func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *config.Workflow, job *config.Job, pulled map[string]bool) (*JobResult, error) {
-	out := os.Stdout
+// signals an infrastructure failure that the scheduler should treat as
+// aborting; a step exiting non-zero is reported as a scheduler.Result with
+// StatusFailed.
+func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *config.Workflow, job *config.Job, images *imageCache, out io.Writer) (scheduler.Result, error) {
 	log.JobStart(out, job.ID)
 
 	jobDir, err := ws.JobDir(job.ID)
 	if err != nil {
-		return nil, err
+		return scheduler.Result{ID: job.ID}, err
 	}
 
-	if !pulled[job.Container] && !rt.ImageExists(ctx, job.Container) {
-		fmt.Fprintf(out, "pulling image %s ...\n", job.Container)
-		if err := rt.Pull(ctx, job.Container, out); err != nil {
-			return nil, err
-		}
+	if err := images.Ensure(ctx, rt, job.Container, out); err != nil {
+		return scheduler.Result{ID: job.ID}, err
 	}
-	pulled[job.Container] = true
 
 	container := fmt.Sprintf("latchet-%s-%s", ws.ID, job.ID)
 	if err := rt.Create(ctx, container, job.Container, jobDir); err != nil {
-		return nil, err
+		return scheduler.Result{ID: job.ID}, err
 	}
 	defer rt.Remove(container)
 
@@ -156,17 +178,17 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 		start := time.Now()
 		code, err := rt.Exec(ctx, container, env, step.Run, out, out)
 		if err != nil {
-			return nil, err
+			return scheduler.Result{ID: job.ID}, err
 		}
 		if code != 0 {
 			log.StepEnd(out, name, false, time.Since(start))
 			detail := fmt.Sprintf("%s exited %d", name, code)
-			log.JobEnd(out, job.ID, string(StatusFailed), detail)
-			return &JobResult{ID: job.ID, Status: StatusFailed, Detail: detail}, nil
+			log.JobEnd(out, job.ID, string(scheduler.StatusFailed), detail)
+			return scheduler.Result{ID: job.ID, Status: scheduler.StatusFailed, Detail: detail}, nil
 		}
 		log.StepEnd(out, name, true, time.Since(start))
 	}
 
-	log.JobEnd(out, job.ID, string(StatusSuccess), "")
-	return &JobResult{ID: job.ID, Status: StatusSuccess}, nil
+	log.JobEnd(out, job.ID, string(scheduler.StatusSuccess), "")
+	return scheduler.Result{ID: job.ID, Status: scheduler.StatusSuccess}, nil
 }
