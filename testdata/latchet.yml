@@ -1,0 +1,25 @@
+name: demo
+env:
+  GLOBAL: workflow-level
+jobs:
+  build:
+    container: alpine:3.19
+    env:
+      STAGE: build
+    steps:
+      - name: write artifact
+        run: echo "hello from $STAGE ($GLOBAL)" > out.txt
+      - name: show artifact
+        run: cat out.txt
+  test:
+    container: alpine:3.19
+    needs: build
+    steps:
+      - name: run tests
+        run: echo "testing"; true
+  deploy:
+    container: alpine:3.19
+    needs: [build, test]
+    steps:
+      - name: deploy
+        run: echo "deploying"

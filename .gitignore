@@ -1,0 +1,5 @@
+# compiled binary (built via `go build -o latchet ./cmd/latchet`)
+/latchet
+
+# local Claude Code settings
+/.claude/settings.local.json
