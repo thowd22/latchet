@@ -35,14 +35,18 @@ pass before implementation.
 - **Workspace retention sweeper** — auto-clean old run directories from temp.
 - **CLI flags** — `validate-only`, `dry-run`, and a real argument parser (v1
   takes no args).
+- **Release pipeline** — tagged releases with published prebuilt binaries.
+  A CI workflow that, on a version tag, cross-compiles `latchet` for
+  linux/macOS/Windows × amd64/arm64 and uploads the binaries (plus checksums)
+  as release assets. **Prerequisite for the installation scripts below** —
+  the installers have nothing to download until this exists.
 - **Automated installation scripts** — one-line installers that fetch the
   right prebuilt binary and put it on `PATH`:
   - **Linux** — `install.sh` (curl-pipe friendly); detect arch (amd64/arm64).
   - **macOS** — `install.sh` covering Intel and Apple Silicon; consider a
     Homebrew formula/tap as a follow-up.
   - **Windows** — `install.ps1` for PowerShell.
-  Requires tagged releases with published binaries (e.g. via CI) for the
-  scripts to download.
+  Depends on the release pipeline above for binaries to download.
 - **Global `latchet-ci.yml` config** — a machine-wide config file (separate
   from the per-project workflow `latchet.yml`) for user defaults: preferred
   container runtime, workspace root, default env, log verbosity. Loaded from a
