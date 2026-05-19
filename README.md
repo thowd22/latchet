@@ -75,6 +75,11 @@ Override with `LATCHET_RUNTIME=podman`.
 
 A failed run always keeps its workspace and prints the path.
 
+## Documentation
+
+- [`docs/design.md`](docs/design.md) — architecture and design rationale
+- [`ROADMAP.md`](ROADMAP.md) — deferred features and v2 candidates
+
 ## Development
 
 ```sh
