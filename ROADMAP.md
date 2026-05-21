@@ -32,6 +32,23 @@ pass before implementation.
   job to proceed past a failed step.
 - **Configurable `shell:`** — v1 hardcodes `sh -c`; allow `bash` etc. per
   job/step.
+- **Built-in pipeline env vars** — values latchet injects into every step
+  automatically, before user-defined `env:` merges on top (so they can be
+  overridden / faked for testing). Initial set:
+  - `WORKSPACE` — the container-side workspace path (always `/workspace`
+    in v2/v3; named for scripts that want to be path-agnostic).
+  - `GIT_URL`, `GIT_BRANCH`, `GIT_TAG`, `GIT_SHA`, `GIT_REF` — populated
+    from the `latchet watch` trigger when available; falls back to
+    shelling out to `git` on the host CWD (`git remote get-url`,
+    `git symbolic-ref`, `git describe --tags`, `git rev-parse HEAD`)
+    when not. Empty string if neither source is available (e.g. running
+    in a non-git directory standalone).
+  - `RUN_ID` — latchet's run id (matches the workspace/log dir name).
+  - `JOB_ID` — the current job's id.
+  Open design questions for implementation time: namespacing (bare names
+  vs `LATCHET_*` prefix, or both for transition), behavior when the host
+  is not a git checkout, and whether `GIT_*` vars are also exported on
+  the host process (for hooks / log lines) or only inside containers.
 
 ### Operational
 - **Secret masking** — redact secret values from streamed logs.
