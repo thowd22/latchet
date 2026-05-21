@@ -58,22 +58,27 @@ pass before implementation.
   environment variables.
 - **`latchet watch` — git change monitoring** — a one-shot command that
   checks each watched repo configured in the global `latchet-ci.yml` for
-  new commits on configured branches; when a branch advances, latchet
-  fetches the new commit and runs that repo's `latchet.yml`. Constraints:
-  - **Branch monitoring only.** No PR / merge-request triggers. Each
-    entry in the global config is a git URL plus a list of branches.
+  new commits on configured branches and tags; when any watched ref
+  advances (or, for tags, appears or moves), latchet fetches the new
+  commit and runs that repo's `latchet.yml`. Constraints:
+  - **Branches and tags only.** No PR / merge-request triggers. Each
+    entry in the global config is a git URL plus a list of branches
+    and/or a list of tag patterns (e.g. exact tags like `v1.0.0`, or
+    globs like `v*`).
   - **SSH only** for git access. The user's existing SSH key is used;
     no HTTPS / token handling.
   - **No internal timer.** `latchet watch` does one pass and exits;
     schedule it with system cron (or any other scheduler) for periodic
     checks. Keeps latchet stateless-as-a-process and avoids reinventing
     cron.
-  - **State per (repo, branch)** — last-seen SHA persisted under
+  - **State per (repo, ref)** — last-seen SHA persisted under
     `$XDG_STATE_HOME/latchet/watch/` so a change is detected exactly
-    once. First run after a new repo is added is a no-op (records the
-    current SHA without firing).
-  - Depends on the global-config item above (where repo URLs + branch
-    lists live).
+    once. First run after a new repo or new tag-pattern is added is a
+    no-op (records current SHAs without firing). New tags matching a
+    watched pattern fire on first sight; tag moves fire (the SHA
+    changed).
+  - Depends on the global-config item above (where repo URLs, branch
+    lists, and tag patterns live).
 
 ## Suggested ordering
 
