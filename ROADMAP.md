@@ -56,6 +56,24 @@ pass before implementation.
   standard location (`$XDG_CONFIG_HOME/latchet/latchet-ci.yml`, `~/.config/...`,
   or `%APPDATA%` on Windows) and overridden by per-project settings and
   environment variables.
+- **`latchet watch` — git change monitoring** — a one-shot command that
+  checks each watched repo configured in the global `latchet-ci.yml` for
+  new commits on configured branches; when a branch advances, latchet
+  fetches the new commit and runs that repo's `latchet.yml`. Constraints:
+  - **Branch monitoring only.** No PR / merge-request triggers. Each
+    entry in the global config is a git URL plus a list of branches.
+  - **SSH only** for git access. The user's existing SSH key is used;
+    no HTTPS / token handling.
+  - **No internal timer.** `latchet watch` does one pass and exits;
+    schedule it with system cron (or any other scheduler) for periodic
+    checks. Keeps latchet stateless-as-a-process and avoids reinventing
+    cron.
+  - **State per (repo, branch)** — last-seen SHA persisted under
+    `$XDG_STATE_HOME/latchet/watch/` so a change is detected exactly
+    once. First run after a new repo is added is a no-op (records the
+    current SHA without firing).
+  - Depends on the global-config item above (where repo URLs + branch
+    lists live).
 
 ## Suggested ordering
 
