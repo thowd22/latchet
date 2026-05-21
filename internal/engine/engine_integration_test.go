@@ -10,7 +10,7 @@ import "testing"
 // TestRunSampleWorkflow runs the bundled three-job sample workflow end to end
 // and expects every job to succeed.
 func TestRunSampleWorkflow(t *testing.T) {
-	if code := Run("../../testdata/latchet.yml"); code != ExitSuccess {
+	if code := Run(Options{File: "../../testdata/latchet.yml"}); code != ExitSuccess {
 		t.Fatalf("Run(testdata/latchet.yml) = %d, want %d", code, ExitSuccess)
 	}
 }

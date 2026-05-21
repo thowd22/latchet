@@ -1,0 +1,72 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  # Manually fireable from the Actions UI to verify cross-compilation
+  # without cutting a real release. workflow_dispatch runs build only —
+  # the release-creation step is gated on a tag ref.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.2'
+          cache: true
+
+      - name: build all targets
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="$(git describe --tags --always --dirty 2>/dev/null || echo dev-${GITHUB_SHA:0:7})"
+          fi
+          SHA="${GITHUB_SHA:0:7}"
+          LDFLAGS="-s -w \
+            -X github.com/thowd22/latchet/internal/version.Version=${TAG} \
+            -X github.com/thowd22/latchet/internal/version.Commit=${SHA}"
+
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS="${target%/*}"
+            GOARCH="${target#*/}"
+            out=latchet
+            [[ "${GOOS}" == "windows" ]] && out=latchet.exe
+            echo "==> building ${GOOS}/${GOARCH}"
+            CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
+              go build -trimpath -ldflags "${LDFLAGS}" -o "${out}" ./cmd/latchet
+            base="latchet-${TAG}-${GOOS}-${GOARCH}"
+            if [[ "${GOOS}" == "windows" ]]; then
+              zip -q "dist/${base}.zip" "${out}"
+            else
+              tar -czf "dist/${base}.tar.gz" "${out}"
+            fi
+            rm -f "${out}"
+          done
+          (cd dist && sha256sum * > SHA256SUMS)
+          ls -la dist
+
+      - name: upload workflow artifacts
+        # Always upload so a workflow_dispatch run leaves something to download.
+        uses: actions/upload-artifact@v4
+        with:
+          name: latchet-dist
+          path: dist/
+
+      - name: create release
+        # Only when triggered by a tag push.
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes
