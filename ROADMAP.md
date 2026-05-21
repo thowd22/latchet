@@ -16,8 +16,11 @@ pass before implementation.
   concurrently instead of sequentially. The DAG already exposes the graph, so
   this is additive; the main work is per-job log prefixing/buffering so streams
   don't interleave. *Lowest-effort high-value item — natural first pick.*
-- **Cross-job artifacts / shared workspace** — pass files between jobs. Today
-  each job's `/workspace` is isolated.
+- **Named artifacts (`upload-artifact` / `download-artifact`-style)** — pass
+  selected files between arbitrary jobs by name. v3 added single-parent
+  workspace inheritance (`inherit: <jobid>`) covering the common
+  parent-to-children case; this item covers the harder cases: many-to-many,
+  fan-in merges, exclude patterns, and persistence across runs.
 
 ### Workflow features
 - **`strategy.matrix`** — fan a job across combinations of variables (e.g.

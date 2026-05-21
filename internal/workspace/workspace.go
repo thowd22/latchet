@@ -9,6 +9,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -62,4 +64,90 @@ func (r *Run) Cleanup(failed bool) string {
 	}
 	os.RemoveAll(r.Root)
 	return ""
+}
+
+// Seed copies the host workspace of srcJobID into dstJobID, so the
+// destination job's container sees the source job's files at /workspace
+// when it starts. Used by jobs declaring `inherit:` in latchet.yml.
+//
+// Regular files, directories (including empty ones), and symlinks are
+// copied. Mode bits are preserved; timestamps and ownership are not.
+// Symlinks are preserved verbatim (cp -P semantics), not followed.
+// Special files (devices, sockets, fifos) cause Seed to fail loudly with
+// the offending path so surprising input never silently disappears.
+//
+// Concurrency: by the time Seed runs, the parent has produced a terminal
+// result through the scheduler (because `inherit` requires `needs`
+// membership). The parent's directory is quiescent; multiple sibling
+// jobs may safely Seed from the same parent concurrently — all are
+// readers of a non-writer.
+func (r *Run) Seed(dstJobID, srcJobID string) error {
+	src := filepath.Join(r.Root, srcJobID)
+	dst := filepath.Join(r.Root, dstJobID)
+
+	if _, err := os.Stat(src); err != nil {
+		return fmt.Errorf("seeding %s from %s: %w", dst, src, err)
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return fmt.Errorf("seeding %s from %s: %w", dst, src, err)
+	}
+
+	walkErr := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		mode := d.Type()
+
+		switch {
+		case mode.IsDir():
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			return os.MkdirAll(target, info.Mode().Perm())
+		case mode&os.ModeSymlink != 0:
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			_ = os.Remove(target) // Symlink fails if target exists
+			return os.Symlink(link, target)
+		case mode.IsRegular():
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			return copyRegular(path, target, info.Mode().Perm())
+		default:
+			return fmt.Errorf("unsupported file type at %s (mode %v)", path, mode)
+		}
+	})
+	if walkErr != nil {
+		return fmt.Errorf("seeding %s from %s: %w", dst, src, walkErr)
+	}
+	return nil
+}
+
+// copyRegular copies one regular file, creating dst with mode and overwriting
+// any existing content.
+func copyRegular(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }

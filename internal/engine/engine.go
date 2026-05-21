@@ -157,6 +157,12 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 		return scheduler.Result{ID: job.ID}, err
 	}
 
+	if job.Inherit != "" {
+		if err := ws.Seed(job.ID, job.Inherit); err != nil {
+			return scheduler.Result{ID: job.ID}, err
+		}
+	}
+
 	if err := images.Ensure(ctx, rt, job.Container, out); err != nil {
 		return scheduler.Result{ID: job.ID}, err
 	}
