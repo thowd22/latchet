@@ -65,6 +65,7 @@ jobs:
   test:
     container: alpine:3.19
     needs: build               # scalar or list: needs: [build, lint]
+    inherit: build             # copy build's /workspace before test starts
     steps:
       - name: run tests
         env:
@@ -77,7 +78,11 @@ jobs:
 - A failing step fails its job; jobs that depend on a failed/skipped job
   are skipped.
 - **Steps** run via `sh -c` with `set -e` prepended. Steps in a job share
-  a `/workspace` directory; jobs do not share with each other.
+  a `/workspace` directory; jobs do not share with each other by default
+  (see `inherit:` below for one-parent file sharing).
+- A job may declare `inherit: <parent-id>` (which must also appear in
+  `needs:`) to start with the parent's `/workspace` files copied in.
+  Single parent only; named-artifact upload/download is not yet supported.
 - `env` merges workflow → job → step, highest precedence last.
 - Unknown keys (`uses`, `strategy`, `runs-on`, ...) are rejected — they
   are not supported.
@@ -101,6 +106,17 @@ Stdout behavior depends on `-max-parallel`:
 - Parallel (default) — stdout shows job start/end markers and the log path
   for each job; full step output goes only to the log file (so concurrent
   jobs don't interleave).
+
+## Sharing files between jobs
+
+A job may declare `inherit: <parent-id>` to start with the named parent's
+`/workspace` copied in. The parent must also appear in `needs:` so the
+graph stays self-documenting. Regular files, directories (including empty
+ones), and symlinks (preserved verbatim, not followed) are copied; mode
+bits are preserved. Special files (devices, sockets, fifos) abort the run
+as an infra error. Single-parent only — multi-parent merge semantics and
+named-artifact upload/download (`actions/upload-artifact`-style) are
+deferred (see ROADMAP).
 
 ## Container runtime
 

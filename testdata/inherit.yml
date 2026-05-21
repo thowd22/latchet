@@ -1,0 +1,17 @@
+name: inherit-demo
+# Two jobs proving workspace inheritance: parent writes a marker file,
+# child inherits parent's workspace and asserts the marker is present
+# with the expected content.
+jobs:
+  parent:
+    container: alpine:3.19
+    steps:
+      - name: write marker
+        run: echo hello > marker.txt
+  child:
+    container: alpine:3.19
+    needs: parent
+    inherit: parent
+    steps:
+      - name: read marker
+        run: test "$(cat marker.txt)" = hello

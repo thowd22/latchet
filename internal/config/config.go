@@ -29,6 +29,7 @@ type Job struct {
 	Container string            `yaml:"container"`
 	Env       map[string]string `yaml:"env"`
 	Needs     StringOrSlice     `yaml:"needs"`
+	Inherit   string            `yaml:"inherit"` // name a single parent whose /workspace is copied in before this job runs; must also appear in needs
 	Steps     []*Step           `yaml:"steps"`
 }
 
@@ -137,6 +138,25 @@ func (wf *Workflow) Validate() error {
 			case wf.Jobs[need] == nil:
 				errs = append(errs, fmt.Sprintf("job %q: needs unknown job %q", id, need))
 				needsSane = false
+			}
+		}
+		if job.Inherit != "" {
+			switch {
+			case job.Inherit == id:
+				errs = append(errs, fmt.Sprintf("job %q: cannot inherit from itself", id))
+			case wf.Jobs[job.Inherit] == nil:
+				errs = append(errs, fmt.Sprintf("job %q: inherits unknown job %q", id, job.Inherit))
+			default:
+				inNeeds := false
+				for _, need := range job.Needs {
+					if need == job.Inherit {
+						inNeeds = true
+						break
+					}
+				}
+				if !inNeeds {
+					errs = append(errs, fmt.Sprintf("job %q: inherits from %q but does not list it in needs", id, job.Inherit))
+				}
 			}
 		}
 	}

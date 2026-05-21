@@ -50,7 +50,8 @@ direction is acyclic: `main` → `engine` → (`config`, `dag`, `scheduler`,
 - `needs` accepts both a scalar and a list via a custom `StringOrSlice`.
 - `Validate()` aggregates *every* problem into one error: ≥1 job; each job
   has a `container` and ≥1 step; each step has a non-empty `run`; every
-  `needs` target exists; no self-`needs`; the graph is acyclic.
+  `needs` target exists; no self-`needs`; `inherit` (when set) names a
+  non-self existing job that also appears in `needs`; the graph is acyclic.
 
 ### `dag` — ordering & waves
 - Generic graph package — it knows nothing about jobs, so it cannot form an
@@ -82,8 +83,13 @@ direction is acyclic: `main` → `engine` → (`config`, `dag`, `scheduler`,
 - One root per run under `<tmpdir>/latchet/<runid>/`; one sub-directory per
   job, bind-mounted to `/workspace`. `runid` is a sortable timestamp plus
   random suffix.
-- Steps in a job share their directory; jobs do **not** share with each
-  other.
+- Steps in a job share their directory; jobs do **not** share by default.
+- `Seed(dstJobID, srcJobID)` copies a parent job's directory into the
+  child's — invoked by `engine.runJob` when the child declares `inherit:`.
+  Regular files, directories (including empty), and symlinks (preserved,
+  not followed; `cp -P` semantics) are copied; mode bits are preserved;
+  timestamps and ownership are not. Special files (devices, sockets,
+  fifos) abort the run with the offending path. Stdlib only.
 - Removed on success; **kept on failure** with the path printed.
   `LATCHET_KEEP_WORKSPACE=1` forces retention; `LATCHET_WORKSPACE_ROOT`
   relocates the root.
@@ -129,6 +135,10 @@ direction is acyclic: `main` → `engine` → (`config`, `dag`, `scheduler`,
   job's log file, picks `stepW` (file only, or `MultiWriter(file, stdout)`
   for N=1), calls `runJob`, and emits terse `== job: X started/done ==`
   lines on stdout under parallel mode.
+- Before running steps, `runJob` checks the job's `inherit:` field and, if
+  set, calls `ws.Seed(job.ID, job.Inherit)` between workspace allocation
+  and image pull. A seed failure is returned as an infra error, which the
+  scheduler treats as aborting (workspace retained for inspection).
 - Exit codes: `0` all succeeded · `1` a job failed · `2` config/parse error
   · `3` infrastructure error.
 

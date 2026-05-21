@@ -124,6 +124,21 @@ func TestValidate(t *testing.T) {
 			yaml:    "jobs:\n  a:\n    container: x\n    needs: a\n    steps: [{run: echo a}]\n",
 			wantSub: "cannot depend on itself",
 		},
+		{
+			name:    "inherit unknown",
+			yaml:    "jobs:\n  a:\n    container: x\n    steps: [{run: echo a}]\n  b:\n    container: x\n    needs: a\n    inherit: ghost\n    steps: [{run: echo b}]\n",
+			wantSub: `inherits unknown job "ghost"`,
+		},
+		{
+			name:    "inherit self",
+			yaml:    "jobs:\n  a:\n    container: x\n    inherit: a\n    steps: [{run: echo a}]\n",
+			wantSub: "cannot inherit from itself",
+		},
+		{
+			name:    "inherit not in needs",
+			yaml:    "jobs:\n  a:\n    container: x\n    steps: [{run: echo a}]\n  b:\n    container: x\n    inherit: a\n    steps: [{run: echo b}]\n",
+			wantSub: `inherits from "a" but does not list it in needs`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -178,5 +193,28 @@ jobs:
 	}
 	if err := wf.Validate(); err != nil {
 		t.Fatalf("expected valid workflow, got %v", err)
+	}
+}
+
+func TestValidateInheritOK(t *testing.T) {
+	wf, err := Load(write(t, `
+jobs:
+  parent:
+    container: x
+    steps: [{run: echo p}]
+  child:
+    container: x
+    needs: parent
+    inherit: parent
+    steps: [{run: echo c}]
+`))
+	if err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
+	if err := wf.Validate(); err != nil {
+		t.Fatalf("expected valid workflow, got %v", err)
+	}
+	if got := wf.Jobs["child"].Inherit; got != "parent" {
+		t.Errorf("Inherit not populated: got %q, want %q", got, "parent")
 	}
 }
