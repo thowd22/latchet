@@ -34,20 +34,28 @@ pass before implementation.
   job/step.
 - **Built-in pipeline env vars** — values latchet injects into every step
   automatically, before user-defined `env:` merges on top (so they can be
-  overridden / faked for testing). Initial set:
-  - `WORKSPACE` — the container-side workspace path (always `/workspace`
-    in v2/v3; named for scripts that want to be path-agnostic).
-  - `GIT_URL`, `GIT_BRANCH`, `GIT_TAG`, `GIT_SHA`, `GIT_REF` — populated
-    from the `latchet watch` trigger when available; falls back to
-    shelling out to `git` on the host CWD (`git remote get-url`,
-    `git symbolic-ref`, `git describe --tags`, `git rev-parse HEAD`)
-    when not. Empty string if neither source is available (e.g. running
-    in a non-git directory standalone).
-  - `RUN_ID` — latchet's run id (matches the workspace/log dir name).
-  - `JOB_ID` — the current job's id.
-  Open design questions for implementation time: namespacing (bare names
-  vs `LATCHET_*` prefix, or both for transition), behavior when the host
-  is not a git checkout, and whether `GIT_*` vars are also exported on
+  overridden / faked for testing). All names are `LATCHET_*`-prefixed so
+  they cannot collide with anything the workflow or container already
+  defines. Initial set:
+  - `LATCHET_WORKSPACE` — the container-side workspace path (always
+    `/workspace` in v2/v3; named for scripts that want to be
+    path-agnostic).
+  - `LATCHET_GIT_URL`, `LATCHET_GIT_BRANCH`, `LATCHET_GIT_TAG`,
+    `LATCHET_GIT_SHA`, `LATCHET_GIT_REF` — populated from the
+    `latchet watch` trigger when available; falls back to shelling out
+    to `git` on the host CWD (`git remote get-url`, `git symbolic-ref`,
+    `git describe --tags`, `git rev-parse HEAD`) when not. Empty string
+    if neither source is available (e.g. running in a non-git directory
+    standalone).
+  - `LATCHET_RUN_ID` — latchet's run id (matches the workspace/log dir
+    name).
+  - `LATCHET_JOB_ID` — the current job's id.
+  Note: distinct from existing `LATCHET_*` env vars the binary *reads*
+  to configure itself (`LATCHET_RUNTIME`, `LATCHET_WORKSPACE_ROOT`,
+  `LATCHET_KEEP_WORKSPACE`, `LATCHET_LOG_DIR`) — those names are
+  reserved on input; the injected ones above are output-only. Open
+  design questions for implementation time: behavior when the host is
+  not a git checkout, and whether the same vars are also exported on
   the host process (for hooks / log lines) or only inside containers.
 
 ### Operational
