@@ -1,0 +1,42 @@
+# latchet's own self-build pipeline.
+#
+# Three independent jobs run in parallel inside golang:1.22.2 containers
+# and validate the latest commit on `main`. Run from the repo root with:
+#
+#   latchet                # parallel (default; uses NumCPU)
+#   latchet -max-parallel 1  # sequential, live-stream output
+#   latchet -dry-run         # show the plan without running
+#
+# Each job clones from origin because latchet v2 starts with an empty
+# /workspace and does not yet support seeding from the host or sharing
+# files between jobs (both are deferred in ROADMAP.md). The upshot:
+# this pipeline validates what is published on `main`, not uncommitted
+# local changes — a feature, not a bug, for a self-test.
+name: latchet self-build
+env:
+  REPO: https://github.com/thowd22/latchet.git
+  REF: main
+jobs:
+  build:
+    container: docker.io/library/golang:1.22.2
+    steps:
+      - name: checkout
+        run: git clone --depth 1 --branch "$REF" "$REPO" .
+      - name: go build
+        run: go build ./...
+
+  vet:
+    container: docker.io/library/golang:1.22.2
+    steps:
+      - name: checkout
+        run: git clone --depth 1 --branch "$REF" "$REPO" .
+      - name: go vet
+        run: go vet ./...
+
+  test:
+    container: docker.io/library/golang:1.22.2
+    steps:
+      - name: checkout
+        run: git clone --depth 1 --branch "$REF" "$REPO" .
+      - name: go test
+        run: go test ./...
