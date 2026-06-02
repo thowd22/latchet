@@ -105,10 +105,222 @@ pass before implementation.
   - Depends on the global-config item above (where repo URLs, branch
     lists, and tag patterns live).
 
+## Supply chain & attestation (standout)
+
+The defining strategic bet: every workflow run produces a signed in-toto
+[SLSA v1.0 provenance attestation](https://slsa.dev/spec/v1.0/provenance) by
+default. Makes latchet the only minimal CI engine that ships SLSA L1+
+out of the box, and lays the foundation for a verifier mode that
+complements the existing executor plane. Pairs with the existing per-job
+log files and release pipeline: every tagged release ships attested
+binaries, and every local run emits a manifest a downstream consumer can
+re-verify.
+
+**Why latchet, why now.** Minimal CI tools (act, drone-cli, every project's
+home-rolled Makefile) emit zero provenance. Big platforms emit it only
+opt-in: GitHub Artifact Attestations needs an explicit workflow step;
+Tekton Chains is its own subsystem. None ship by default in a small
+binary. Sigstore made keyless signing tractable for non-experts (cosign,
+Fulcio, Rekor are widely deployed in 2026), and AI-generated code
+pipelines amplify supply-chain risk — per-run attestation is becoming
+table-stakes for any code touched by agentic tooling.
+
+The architectural framing (from the executor-vs-verifier conversation):
+latchet is the executor; this feature is what lets latchet's outputs
+plug into a verifier model without bolting on a separate trust plane.
+
+### Subsystem 1 — Provenance emission (small; gets every run to SLSA L1)
+
+After each run, write `<logdir>/provenance.json` per SLSA v1.0 schema
+inside an [in-toto attestation](https://github.com/in-toto/attestation)
+envelope (`statement.predicate = slsaprovenance/v1`). Contents:
+
+- **subject[]** — SHA256 of each artifact found at end-of-job under
+  `/workspace`, one entry per file (or aggregated per job — design
+  call).
+- **predicate.buildDefinition.buildType** — a latchet-specific URI like
+  `https://latchet.dev/buildtypes/v1`.
+- **predicate.buildDefinition.externalParameters** — workflow file SHA
+  (of the on-disk `latchet.yml` at run time), invocation arguments
+  (`file`, `max_parallel`, `dry_run`).
+- **predicate.buildDefinition.internalParameters** — merged env (secret
+  values redacted when secret-masking is enabled), per-step `run`
+  strings, container image references *as written in YAML*.
+- **predicate.buildDefinition.resolvedDependencies** — image references
+  *as resolved at pull time* (digest-pinned, e.g.
+  `docker.io/library/golang@sha256:…`), so the manifest pins exactly
+  the byte-level image used.
+- **predicate.runDetails.builder.id** — `https://latchet.dev/builders/v3+`
+  plus `internal/version.Version`+`Commit`.
+- **predicate.runDetails.metadata.invocationId** — latchet's run id
+  (matches the workspace and log dir name).
+- **predicate.runDetails.metadata.startedOn / finishedOn** — ISO 8601.
+
+No reproducibility required for L1 — the provenance just needs to exist
+and be faithful. Most CI workflows today are SLSA L0; landing this
+takes any latchet run to L1 with no user action required.
+
+Open design questions: per-job-attestation vs single-run-attestation
+(multi-subject); secret-value redaction policy; how to record "subjects"
+for effect-only jobs (deploy, notify) that produce no file outputs.
+
+### Subsystem 2 — Determinism helpers (small; raises the ceiling of what's verifiable)
+
+Optional knobs that remove the cheapest sources of nondeterminism so a
+larger fraction of any workflow's output is reproducible (and therefore
+verifiable). Activated by `deterministic: true` per-job or workflow-level,
+or by `LATCHET_DETERMINISTIC=1`:
+
+- Inject `SOURCE_DATE_EPOCH` (derived from `LATCHET_GIT_SHA`'s commit
+  timestamp when available, else the run-start time).
+- Set `LC_ALL=C`, `TZ=UTC`, `LANG=C` in step env.
+- Pass `--mtime` / `--sort=name` hints to common archive tools via a
+  small documented shim ("if you tar, use these flags").
+- Document the `SOURCE_DATE_EPOCH`-aware toolchains (Go, recent npm,
+  cargo with `-Zremap-debuginfo`, gcc with `-ffile-prefix-map`) as
+  best-effort tips, not enforced guarantees.
+
+This does **not** enforce reproducibility — that lives in the toolchain
+and the workflow author's discipline. Subsystem 2 is 80/20 triage that
+makes verifier-mode genuinely useful for ordinary workflows; hermetic
+guarantees (Nix-grade) are out of scope and always will be.
+
+### Subsystem 3 — Sigstore signing (small once `cosign` is on the host)
+
+After provenance emission, optionally sign the attestation and publish
+to a transparency log:
+
+- For file artifacts: `cosign attest-blob --predicate provenance.json
+  --type slsaprovenance1 <artifact>` per subject.
+- For OCI artifacts (the release pipeline pushing container images,
+  when that lands): `cosign attest --predicate ... <image-ref>`.
+- For tagged releases (`.github/workflows/release.yml`): cosign uses
+  GitHub Actions OIDC to mint a short-lived Fulcio cert — **no key
+  material on disk** — and pushes the signature to the
+  [Rekor](https://docs.sigstore.dev/logging/overview/) append-only
+  transparency log.
+- Downstream verification is one command:
+  `cosign verify-blob-attestation --type slsaprovenance1
+  --certificate-identity-regexp '^https://github\.com/thowd22/latchet/' …
+  <artifact>` against the published cert identity.
+
+`cosign` is a **soft dependency** — if absent from PATH, latchet emits
+the unsigned attestation and logs a single line ("cosign not found,
+attestation unsigned"). No hard install requirement.
+
+### Subsystem 4 — `latchet verify <manifest>` (medium; the verifier role made real)
+
+The standout differentiator from any other minimal CI tool: any user
+can re-derive any other user's claimed build, locally, in one command.
+
+```sh
+latchet verify provenance.json
+latchet verify --strict provenance.json
+latchet verify --explain provenance.json   # diffoscope output on mismatch
+```
+
+Operation:
+
+1. Parse the SLSA statement; extract resolved image digests, workflow
+   SHA, source SHA, step commands, merged env.
+2. Re-run the workflow against the recorded inputs in a fresh
+   workspace, pinning the same image digests.
+3. Hash the re-derived subjects and compare.
+
+Modes:
+
+- `--strict` — every subject must match bit-for-bit; any mismatch is an
+  error. Only useful when the workflow is fully reproducible.
+- `--lax` (default) — match what we can; list mismatches as warnings;
+  exit 0 if the *workflow structure* and the *deterministic subjects*
+  match even when full outputs differ. Honest behavior for the common
+  case where reproducibility is partial.
+- `--explain` — for each mismatch, shell out to `diffoscope` (if
+  available) and include the structural diff in a verification report
+  at `<logdir>/verification.json`.
+
+Useful for: release maintainers re-verifying contributor builds, CI
+gates checking upstream attestations, adversarial verification by
+independent parties (informal quorum trust).
+
+### SLSA level mapping — what latchet can credibly claim
+
+| Level | Requirement (SLSA v1.0) | latchet status |
+|-------|--------------------------|----------------|
+| L1    | Provenance exists, generated by the build platform | ✅ Subsystem 1 (every run) |
+| L2    | Hosted build platform; signed provenance | ✅ Subsystem 1+3 for release-pipeline builds running in GHA; ❌ for local `latchet` runs (a laptop is not a "hosted build platform" by SLSA's definition) |
+| L3    | Hardened, isolated builder; signing keys inaccessible to build steps | ❌ Out of reach without a separate trusted backplane; Fulcio's keyless flow gives us the *signing-key isolation* piece but not the *hardened builder* piece |
+| L4    | Hermetic, reproducible | ❌ Requires hermetic toolchains; not in latchet's gift |
+
+The honest framing: **latchet ships SLSA L1 by default, L2 for releases
+built on GitHub Actions, and exposes verifier tooling that builds
+informal trust above that through quorum / independent verification —
+but it does not and cannot claim L3/L4 without a separate
+trusted-execution backplane.** Marketing this honestly is itself a
+differentiator; most CI vendors overclaim.
+
+### Dependencies & sequencing
+
+1. **Subsystem 1** (provenance emission) — fully independent; ship first.
+2. **Subsystem 3** (sigstore signing) — depends on 1; trivial follow-on
+   once cosign is wired.
+3. **Subsystem 2** (determinism helpers) — independent; gains real value
+   only alongside 4.
+4. **Subsystem 4** (verify mode) — depends on 1 (+2 to be useful);
+   medium effort; honest value depends on workflow-level
+   reproducibility that's largely upstream.
+
+Loose dependency on the **secret masking** roadmap item — provenance
+must redact secret env values, so the masking implementation feeds the
+provenance writer. Loose dependency on **`latchet watch`** — when watch
+triggers a run, the `externalParameters` should record the trigger
+(repo, ref, SHA) so the attestation reflects the cause-of-build.
+
+### Out of scope (deferred or never)
+
+- Hosted verifier service / SaaS — this is CLI tooling, not a server.
+- Hermetic toolchains — Nix / Bazel handle that; latchet doesn't try.
+- VEX / vulnerability assertions — orthogonal supply-chain concern;
+  pair with `grype` / `trivy` externally.
+- SBOM generation — would pair well (`syft`, `cyclonedx-cli`) but is a
+  separate feature with its own design.
+- Multi-party quorum verification / threshold signing — interesting
+  but well beyond v3+; the verify command supports informal quorum
+  (run it on N machines, compare reports) without protocol-level
+  support.
+
+### Honest limits — what to say out loud
+
+1. **Reproducibility is mostly upstream.** Latchet can emit provenance
+   and verify what's reproducible; it cannot make `cargo build`
+   deterministic when it isn't. Subsystem 2 is triage, not a guarantee.
+2. **L3+ requires a trusted backplane.** A laptop signing its own
+   provenance does not satisfy SLSA L3, no matter how clean the
+   attestation. Don't market L3+ from local runs.
+3. **The verifier mode's value scales with adoption.** One person
+   running `latchet verify` proves little; ten independent parties
+   running it on the same manifest is the actual trust mechanism. The
+   tool ships the capability; the trust comes from social use.
+
 ## Suggested ordering
 
-1. **Parallel job execution** — cheap, the groundwork exists, immediate speedup.
-2. **CLI flags** (`validate-only`, `dry-run`) — small, improves the dev loop.
-3. **`uses` / reusable actions** — the big one; do it once the engine is stable.
+Done so far:
+1. ~~Parallel job execution~~ — shipped in v0.2.0.
+2. ~~CLI flags~~ — shipped in v0.2.0.
+3. ~~Workspace inheritance~~ — shipped in v0.3.0 (covers the
+   parent-fan-out subset of cross-job artifacts).
+
+Next picks (in rough order of value-per-effort):
+1. **Built-in pipeline env vars** (LATCHET_*) — small, immediately
+   useful, prerequisite context for the watch + provenance features.
+2. **Supply chain & attestation, Subsystem 1+3** (provenance + sigstore
+   signing) — the standout differentiator; small effort for the
+   capability you get; lands SLSA L1 on every run and L2 on every
+   release.
+3. **Global `latchet-ci.yml` + `latchet watch`** — turns latchet into a
+   minimal CI server you can run from cron.
+4. **`uses` / reusable actions** — still the largest single item; do
+   it once the engine is stable and the supply-chain story is in
+   place (so fetched actions can be verified).
 
 Everything else can follow demand.
