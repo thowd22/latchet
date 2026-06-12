@@ -1,0 +1,20 @@
+name: builtinenv-demo
+# Proves latchet injects its built-in LATCHET_* vars into every step, and that
+# a workflow can override one of them (overridable invariant). No git facts are
+# asserted here since they depend on the host checkout; the always-present
+# WORKSPACE/RUN_ID/JOB_ID vars are checked, plus the GIT_* keys merely existing.
+jobs:
+  check:
+    container: alpine:3.19
+    env:
+      LATCHET_WORKSPACE: /overridden   # user env must win over the built-in
+    steps:
+      - name: assert built-ins present
+        run: |
+          test "$LATCHET_WORKSPACE" = /overridden
+          test "$LATCHET_JOB_ID" = check
+          test -n "$LATCHET_RUN_ID"
+          # GIT_* vars are always defined (possibly empty); referencing them
+          # under `set -e`/unset would not fail, but env should list them.
+          env | grep -q '^LATCHET_GIT_SHA='
+          env | grep -q '^LATCHET_GIT_REF='

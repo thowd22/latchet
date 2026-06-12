@@ -10,6 +10,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/thowd22/latchet/internal/builtinenv"
 	"github.com/thowd22/latchet/internal/config"
 	"github.com/thowd22/latchet/internal/dag"
 	"github.com/thowd22/latchet/internal/envutil"
@@ -75,10 +76,14 @@ func Run(opts Options) int {
 		maxParallel = 1
 	}
 
+	// Resolve source-control facts once per run (run-level, host CWD) and inject
+	// them into every job as LATCHET_GIT_* built-in env vars.
+	git := builtinenv.ResolveGit(context.Background())
+
 	results, infraErr := scheduler.Run(context.Background(), g, scheduler.Options{
 		MaxParallel: maxParallel,
 		RunJob: func(ctx context.Context, jobID string) (scheduler.Result, error) {
-			return runOne(ctx, rt, ws, ls, wf, jobID, images, opts.Stdout, maxParallel)
+			return runOne(ctx, rt, ws, ls, wf, jobID, images, opts.Stdout, maxParallel, git)
 		},
 		OnSkip: func(jobID, reason string) {
 			log.JobSkip(opts.Stdout, jobID, reason)
@@ -117,7 +122,7 @@ func Run(opts Options) int {
 // user sees streaming output (matching v1's UX). For maxParallel > 1, stdout
 // gets only terse begin/end markers, since interleaving live step output
 // from concurrent jobs is unreadable.
-func runOne(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, ls *logstore.Run, wf *config.Workflow, jobID string, images *imageCache, stdout io.Writer, maxParallel int) (scheduler.Result, error) {
+func runOne(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, ls *logstore.Run, wf *config.Workflow, jobID string, images *imageCache, stdout io.Writer, maxParallel int, git builtinenv.Git) (scheduler.Result, error) {
 	logFile, logPath, err := ls.OpenJob(jobID)
 	if err != nil {
 		return scheduler.Result{ID: jobID}, err
@@ -131,7 +136,7 @@ func runOne(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, ls *log
 		fmt.Fprintf(stdout, "\n== job: %s started (log: %s) ==\n", jobID, logPath)
 	}
 
-	res, err := runJob(ctx, rt, ws, wf, wf.Jobs[jobID], images, stepW)
+	res, err := runJob(ctx, rt, ws, wf, wf.Jobs[jobID], images, stepW, git)
 	if maxParallel > 1 {
 		switch {
 		case err != nil:
@@ -149,8 +154,13 @@ func runOne(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, ls *log
 // signals an infrastructure failure that the scheduler should treat as
 // aborting; a step exiting non-zero is reported as a scheduler.Result with
 // StatusFailed.
-func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *config.Workflow, job *config.Job, images *imageCache, out io.Writer) (scheduler.Result, error) {
+func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *config.Workflow, job *config.Job, images *imageCache, out io.Writer, git builtinenv.Git) (scheduler.Result, error) {
 	log.JobStart(out, job.ID)
+
+	// Built-in vars are identical for every step in the job and form the
+	// lowest-precedence base of the env merge, so user env can override them.
+	// "/workspace" is the fixed container-side mount point (see runtime).
+	builtins := builtinenv.For(ws.ID, job.ID, "/workspace", git)
 
 	jobDir, err := ws.JobDir(job.ID)
 	if err != nil {
@@ -180,7 +190,7 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 		}
 		log.StepStart(out, name)
 
-		env := envutil.Merge(wf.Env, job.Env, step.Env)
+		env := envutil.Merge(builtins, wf.Env, job.Env, step.Env)
 		start := time.Now()
 		code, err := rt.Exec(ctx, container, env, step.Run, out, out)
 		if err != nil {

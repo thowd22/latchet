@@ -22,7 +22,8 @@ cmd/latchet/main.go        entry: parses flags, resolves the workflow path, disp
 internal/
   config/                  YAML schema, strict parsing, aggregated validation
   dag/                     topological order + parallel-wave grouping + cycle detection
-  envutil/                 ordered env merge (workflow -> job -> step)
+  envutil/                 ordered env merge (built-in -> workflow -> job -> step)
+  builtinenv/              LATCHET_* vars injected into every step (git facts, run/job ids)
   workspace/               per-run/per-job host directories, cleanup policy
   runtime/                 docker/podman detection + container lifecycle
   log/                     plain-text job/step markers + run summary
@@ -37,8 +38,8 @@ scripts/                   install.sh (Linux/macOS) + install.ps1 (Windows)
 
 All non-`main` code is under `internal/` — no public Go API. Dependency
 direction is acyclic: `main` → `engine` → (`config`, `dag`, `scheduler`,
-`runtime`, `workspace`, `envutil`, `log`, `logstore`); `scheduler` →
-`dag`; `version` is leaf.
+`runtime`, `workspace`, `envutil`, `builtinenv`, `log`, `logstore`);
+`scheduler` → `dag`; `version` is leaf.
 
 ## Components
 
@@ -106,9 +107,23 @@ direction is acyclic: `main` → `engine` → (`config`, `dag`, `scheduler`,
   streaming output as in v1.
 
 ### `envutil` — environment merge
-- `Merge()` overlays workflow → job → step (increasing precedence) and
-  returns a **sorted** `[]string` of `KEY=VALUE`, so generated container
-  commands are deterministic.
+- `Merge()` overlays built-in → workflow → job → step (increasing
+  precedence) and returns a **sorted** `[]string` of `KEY=VALUE`, so
+  generated container commands are deterministic.
+
+### `builtinenv` — injected step variables
+- Computes the `LATCHET_*` vars latchet injects into every step as the
+  lowest-precedence layer (so user `env:` overrides them): `LATCHET_WORKSPACE`,
+  `LATCHET_RUN_ID`, `LATCHET_JOB_ID`, and `LATCHET_GIT_{URL,BRANCH,TAG,SHA,REF}`.
+- `ResolveGit()` shells out to `git` against the host CWD once per run
+  (run-level), best-effort: missing `git`, a non-git directory, or any failing
+  sub-command leaves the affected field empty. `DeriveRef()` builds the full
+  ref from branch (preferred) or tag without an extra `git` call.
+- Output-only, and namespaced so they cannot collide with workflow/image vars;
+  distinct from the input `LATCHET_*` vars the binary *reads* to configure
+  itself (`LATCHET_RUNTIME`, `LATCHET_WORKSPACE_ROOT`, …). Designed so a future
+  `latchet watch` trigger can supply the git facts directly instead of the
+  CWD probe.
 
 ### `scheduler` — parallel runner
 - Owns parallel execution. A single controller goroutine + bounded worker
@@ -139,6 +154,9 @@ direction is acyclic: `main` → `engine` → (`config`, `dag`, `scheduler`,
   set, calls `ws.Seed(job.ID, job.Inherit)` between workspace allocation
   and image pull. A seed failure is returned as an infra error, which the
   scheduler treats as aborting (workspace retained for inspection).
+- `Run` calls `builtinenv.ResolveGit` once and threads the result to every
+  job; `runJob` builds the per-job built-in map and prepends it to the
+  `envutil.Merge` call so injected vars sit below user `env:`.
 - Exit codes: `0` all succeeded · `1` a job failed · `2` config/parse error
   · `3` infrastructure error.
 

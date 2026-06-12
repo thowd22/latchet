@@ -62,6 +62,8 @@ jobs:
         run: echo "hello from $STAGE ($GLOBAL)" > out.txt
       - name: show artifact
         run: cat out.txt
+      - name: built-in vars            # LATCHET_* injected automatically
+        run: echo "run $LATCHET_RUN_ID, job $LATCHET_JOB_ID, sha $LATCHET_GIT_SHA"
   test:
     container: alpine:3.19
     needs: build               # scalar or list: needs: [build, lint]
@@ -83,9 +85,34 @@ jobs:
 - A job may declare `inherit: <parent-id>` (which must also appear in
   `needs:`) to start with the parent's `/workspace` files copied in.
   Single parent only; named-artifact upload/download is not yet supported.
-- `env` merges workflow → job → step, highest precedence last.
+- `env` merges built-in → workflow → job → step, highest precedence last
+  (see [Built-in step variables](#built-in-step-variables)).
 - Unknown keys (`uses`, `strategy`, `runs-on`, ...) are rejected — they
   are not supported.
+
+## Built-in step variables
+
+latchet injects a set of `LATCHET_*` variables into every step before your
+own `env:` merges on top — so they are available everywhere and can be
+overridden (or faked for testing) by any `env:` you declare. The `LATCHET_`
+prefix keeps them from colliding with workflow- or image-defined variables.
+
+| Variable | Value |
+|----------|-------|
+| `LATCHET_WORKSPACE` | container-side workspace path (always `/workspace`) |
+| `LATCHET_RUN_ID` | this run's id (matches the workspace and log dir name) |
+| `LATCHET_JOB_ID` | the current job's id |
+| `LATCHET_GIT_URL` | origin remote URL of the host checkout |
+| `LATCHET_GIT_BRANCH` | current branch (empty in detached HEAD) |
+| `LATCHET_GIT_TAG` | tag name when HEAD is exactly a tag, else empty |
+| `LATCHET_GIT_SHA` | full commit SHA of HEAD |
+| `LATCHET_GIT_REF` | full ref, e.g. `refs/heads/main` or `refs/tags/v1.0.0` |
+
+The `LATCHET_GIT_*` values are read from the host working directory via `git`
+(best-effort: empty strings when run outside a git checkout or with no `git`
+on `PATH`). These are *output* variables injected into steps, distinct from
+the *input* variables in [Environment variables](#environment-variables) that
+configure latchet itself.
 
 ## Output and logs
 

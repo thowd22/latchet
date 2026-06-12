@@ -32,11 +32,12 @@ pass before implementation.
   job to proceed past a failed step.
 - **Configurable `shell:`** — v1 hardcodes `sh -c`; allow `bash` etc. per
   job/step.
-- **Built-in pipeline env vars** — values latchet injects into every step
+- ~~**Built-in pipeline env vars**~~ — **shipped** (`internal/builtinenv`).
+  Values latchet injects into every step
   automatically, before user-defined `env:` merges on top (so they can be
   overridden / faked for testing). All names are `LATCHET_*`-prefixed so
   they cannot collide with anything the workflow or container already
-  defines. Initial set:
+  defines. Shipped set:
   - `LATCHET_WORKSPACE` — the container-side workspace path (always
     `/workspace` in v2/v3; named for scripts that want to be
     path-agnostic).
@@ -53,12 +54,38 @@ pass before implementation.
   Note: distinct from existing `LATCHET_*` env vars the binary *reads*
   to configure itself (`LATCHET_RUNTIME`, `LATCHET_WORKSPACE_ROOT`,
   `LATCHET_KEEP_WORKSPACE`, `LATCHET_LOG_DIR`) — those names are
-  reserved on input; the injected ones above are output-only. Open
-  design questions for implementation time: behavior when the host is
-  not a git checkout, and whether the same vars are also exported on
-  the host process (for hooks / log lines) or only inside containers.
+  reserved on input; the injected ones above are output-only.
+  Resolved at implementation: the git facts come from a best-effort
+  `git` probe of the host CWD (empty strings outside a checkout or with
+  no `git`); `LATCHET_GIT_TAG` uses `describe --tags --exact-match` (tag
+  only when HEAD *is* a tag); `LATCHET_GIT_REF` is derived from
+  branch/tag with branch preferred (no extra `git` call); the vars are
+  injected only inside containers, not exported on the host process.
+  Still open for `latchet watch`: letting a trigger's known ref/SHA
+  override the CWD probe.
 
 ### Operational
+- **Minimal web UI** — a read-only local dashboard for browsing runs and
+  their logs, served by a new `latchet ui` subcommand (`latchet ui --port
+  8080`). Strictly an observability layer over what's already on disk; it
+  does **not** trigger, schedule, or mutate runs. Scope:
+  - **Single static binary, no external deps.** Serve from Go's
+    `net/http`; embed assets with `embed.FS`. No Node build step, no
+    database — the persistent per-run log directory (with its `latest`
+    symlink) is the source of truth.
+  - **Views.** A run list (most-recent first, parsed from the log dir
+    names / `latest`), a per-run page showing each job's status and a
+    link to its log, and raw per-job log streaming. Job status comes
+    from the existing run summary; live tailing of an in-flight run is a
+    follow-up, not v1.
+  - **Localhost-only by default.** Bind `127.0.0.1`; no auth, no TLS.
+    Exposing it on a network is the operator's call and out of scope for
+    the minimal cut.
+  - Depends on nothing new; reads `logstore`'s existing layout. Pairs
+    naturally with the **provenance** work — once `provenance.json` lands
+    per run, the run page can surface the attestation. Bigger questions
+    (triggering runs from the UI, multi-host aggregation, websockets for
+    live logs) are explicit non-goals for the minimal version.
 - **Secret masking** — redact secret values from streamed logs.
 - **Workspace retention sweeper** — auto-clean old run directories from temp.
 - **CLI flags** — `validate-only`, `dry-run`, and a real argument parser (v1
@@ -309,17 +336,18 @@ Done so far:
 2. ~~CLI flags~~ — shipped in v0.2.0.
 3. ~~Workspace inheritance~~ — shipped in v0.3.0 (covers the
    parent-fan-out subset of cross-job artifacts).
+4. ~~Built-in pipeline env vars~~ (`LATCHET_*`) — shipped
+   (`internal/builtinenv`); injects WORKSPACE/RUN_ID/JOB_ID + GIT_*
+   facts below user env.
 
 Next picks (in rough order of value-per-effort):
-1. **Built-in pipeline env vars** (LATCHET_*) — small, immediately
-   useful, prerequisite context for the watch + provenance features.
-2. **Supply chain & attestation, Subsystem 1+3** (provenance + sigstore
+1. **Supply chain & attestation, Subsystem 1+3** (provenance + sigstore
    signing) — the standout differentiator; small effort for the
    capability you get; lands SLSA L1 on every run and L2 on every
    release.
-3. **Global `latchet-ci.yml` + `latchet watch`** — turns latchet into a
+2. **Global `latchet-ci.yml` + `latchet watch`** — turns latchet into a
    minimal CI server you can run from cron.
-4. **`uses` / reusable actions** — still the largest single item; do
+3. **`uses` / reusable actions** — still the largest single item; do
    it once the engine is stable and the supply-chain story is in
    place (so fetched actions can be verified).
 
