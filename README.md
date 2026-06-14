@@ -157,6 +157,39 @@ Stdout behavior depends on `-max-parallel`:
   for each job; full step output goes only to the log file (so concurrent
   jobs don't interleave).
 
+## Provenance (SLSA)
+
+Every executed run writes a `provenance.json` next to its logs:
+
+```
+~/.local/state/latchet/<runid>/provenance.json
+```
+
+It is an [in-toto](https://github.com/in-toto/attestation) statement carrying
+a [SLSA v1.0](https://slsa.dev/spec/v1.0/provenance) provenance predicate, so
+**every latchet run is SLSA Build L1 with no extra configuration**. It records:
+
+- **subject[]** — SHA256 of each file left under a job's `/workspace`
+  (named `<jobid>/<path>`). A run with no file artifacts attests the
+  workflow file itself.
+- **resolvedDependencies** — each container image pinned to the digest it
+  actually resolved to at pull time (`…/golang@sha256:…`).
+- **externalParameters** — the workflow file path + its SHA256, the
+  invocation flags, and the source git ref/revision.
+- **internalParameters** — per-job image (as written) and per-step `run`
+  strings and merged env.
+- **builder / metadata** — latchet version+commit, run id, and start/finish
+  timestamps.
+
+Emission is best-effort and never changes a run's exit code. It is written
+for failed runs too (a faithful record), but not when a run aborts on an
+infrastructure error.
+
+> ⚠️ **Secret values are not yet redacted.** Until secret masking lands,
+> `internalParameters` records merged env *values* in plaintext. Treat the
+> log directory accordingly; don't publish `provenance.json` from a run whose
+> env carried secrets.
+
 ## Sharing files between jobs
 
 A job may declare `inherit: <parent-id>` to start with the named parent's

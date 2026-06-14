@@ -73,6 +73,16 @@ RID="$(readlink "$RUNLOGS/latest")"
 has "LATCHET_RUN_ID matches dir" "$AL" "RUN=$RID"
 has "scalar needs ran b"         "$BL" "SCALAR_NEEDS ok"
 
+echo "===== PROVENANCE (SLSA) ====="
+PROV="$RUNLOGS/latest/provenance.json"
+[ -f "$PROV" ] && ok "provenance.json written" || bad "provenance.json written"
+has "predicateType slsa v1"      "$PROV" "https://slsa.dev/provenance/v1"
+has "in-toto statement type"     "$PROV" "https://in-toto.io/Statement/v1"
+has "invocationId == run id"     "$PROV" "$RID"
+has "resolved image digest pinned" "$PROV" "@sha256:"
+has "builder id stamped"         "$PROV" "latchet.dev/builders/latchet@"
+grep -qE '"sha256": "[0-9a-f]{64}"' "$PROV" && ok "subject sha256 present" || bad "subject sha256 present"
+
 echo "===== FEATURE RUN (tag checkout: GIT_TAG / GIT_REF) ====="
 git -C "$HOME/latchet-src" fetch -q --tags 2>/dev/null
 git -C "$HOME/latchet-src" -c advice.detachedHead=false checkout -q v0.4.0

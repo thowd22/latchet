@@ -165,6 +165,15 @@ plug into a verifier model without bolting on a separate trust plane.
 
 ### Subsystem 1 — Provenance emission (small; gets every run to SLSA L1)
 
+> **Shipped** (`internal/provenance`, wired in `engine.Run`). Every executed
+> run writes `<logdir>/provenance.json`: an in-toto statement with a SLSA
+> v1.0 predicate (subjects hashed from job workspaces, images digest-pinned
+> via `runtime.ImageDigest`, workflow SHA, git source, builder + timestamps).
+> Best-effort; never changes exit code. Open follow-ups below remain:
+> secret-value redaction (a no-op `provenance.Redact` seam exists, awaiting
+> the secret-masking item) and an `artifacts:` selector to scope large
+> workspaces. See [`docs/provenance-plan.md`](docs/provenance-plan.md).
+
 After each run, write `<logdir>/provenance.json` per SLSA v1.0 schema
 inside an [in-toto attestation](https://github.com/in-toto/attestation)
 envelope (`statement.predicate = slsaprovenance/v1`). Contents:
@@ -347,11 +356,16 @@ Done so far:
    (`internal/builtinenv`); injects WORKSPACE/RUN_ID/JOB_ID + GIT_*
    facts below user env.
 
+Done so far (cont.):
+5. ~~**Supply chain & attestation, Subsystem 1**~~ (provenance emission) —
+   shipped (`internal/provenance`); every run emits a SLSA v1.0
+   `provenance.json` → SLSA L1.
+
 Next picks (in rough order of value-per-effort):
-1. **Supply chain & attestation, Subsystem 1+3** (provenance + sigstore
-   signing) — the standout differentiator; small effort for the
-   capability you get; lands SLSA L1 on every run and L2 on every
-   release.
+1. **Supply chain & attestation, Subsystem 3** (sigstore signing) — the
+   trivial follow-on now that Subsystem 1 has shipped: sign
+   `provenance.json` with `cosign` when present (soft dependency), else
+   emit unsigned. Lands SLSA L2 on releases built in GitHub Actions.
 2. **Global `latchet-ci.yml` + `latchet watch`** — turns latchet into a
    minimal CI server you can run from cron.
 3. **`uses` / reusable actions** — still the largest single item; do

@@ -80,6 +80,7 @@ func Run(opts Options) int {
 	// them into every job as LATCHET_GIT_* built-in env vars.
 	git := builtinenv.ResolveGit(context.Background())
 
+	started := time.Now()
 	results, infraErr := scheduler.Run(context.Background(), g, scheduler.Options{
 		MaxParallel: maxParallel,
 		RunJob: func(ctx context.Context, jobID string) (scheduler.Result, error) {
@@ -89,6 +90,7 @@ func Run(opts Options) int {
 			log.JobSkip(opts.Stdout, jobID, reason)
 		},
 	})
+	finished := time.Now()
 
 	if infraErr != nil {
 		fmt.Fprintf(opts.Stderr, "latchet: %v\n", infraErr)
@@ -110,6 +112,9 @@ func Run(opts Options) int {
 	for _, id := range g.Order {
 		log.SummaryLine(opts.Stdout, id, string(results[id].Status))
 	}
+
+	// Emit SLSA provenance before cleanup, while job artifacts still exist.
+	emitProvenance(ws, ls, wf, opts, git, images, maxParallel, started, finished, opts.Stdout, opts.Stderr)
 
 	if kept := ws.Cleanup(exit != ExitSuccess); kept != "" {
 		fmt.Fprintf(opts.Stdout, "\nworkspace kept at %s\n", kept)
