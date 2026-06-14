@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // Runtime is a resolved container CLI.
@@ -89,15 +90,46 @@ func (r *Runtime) ImageExists(ctx context.Context, image string) bool {
 	return c.Run() == nil
 }
 
-// Pull fetches an image, streaming progress to out.
+// Pull fetches an image, streaming progress to out. On failure the runtime's
+// own diagnostic (e.g. "short-name ... did not resolve") is captured and
+// folded into the returned error, so the console message is actionable rather
+// than a bare "exit status 125".
 func (r *Runtime) Pull(ctx context.Context, image string, out io.Writer) error {
+	tail := &tailWriter{max: 2048}
 	c := exec.CommandContext(ctx, r.Bin, pullArgs(image)...)
-	c.Stdout, c.Stderr = out, out
+	w := io.MultiWriter(out, tail)
+	c.Stdout, c.Stderr = w, w
 	if err := c.Run(); err != nil {
-		return fmt.Errorf("pulling image %s: %w", image, err)
+		return pullError(image, err, tail.String())
 	}
 	return nil
 }
+
+// pullError formats a pull failure, appending the runtime's captured output
+// when there is any so the caller sees why the pull failed.
+func pullError(image string, err error, captured string) error {
+	if captured = strings.TrimSpace(captured); captured != "" {
+		return fmt.Errorf("pulling image %s: %w\n%s", image, err, captured)
+	}
+	return fmt.Errorf("pulling image %s: %w", image, err)
+}
+
+// tailWriter retains the last max bytes written to it, used to surface the
+// end of a streamed subprocess's output in an error message.
+type tailWriter struct {
+	max int
+	buf []byte
+}
+
+func (w *tailWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	if len(w.buf) > w.max {
+		w.buf = w.buf[len(w.buf)-w.max:]
+	}
+	return len(p), nil
+}
+
+func (w *tailWriter) String() string { return string(w.buf) }
 
 // Create creates and starts the long-lived container for a job.
 func (r *Runtime) Create(ctx context.Context, name, image, workspaceHost string) error {

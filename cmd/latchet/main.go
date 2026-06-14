@@ -35,6 +35,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		dryRun       = fs.Bool("dry-run", false, "print the execution plan and exit; no containers spawned")
 		maxParallel  = fs.Int("max-parallel", defaultParallel, "maximum jobs to run concurrently; 1 streams output live like v1")
 		showVersion  = fs.Bool("version", false, "print version and exit")
+		showHelp     = fs.Bool("help", false, "print usage and exit")
 		showHelpH    = fs.Bool("h", false, "print usage and exit (alias for -help)")
 	)
 	fs.Usage = func() { printUsage(stderr) }
@@ -43,7 +44,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// flag's ContinueOnError already wrote the error and usage.
 		return engine.ExitConfig
 	}
-	if *showHelpH {
+	if *showHelp || *showHelpH {
 		printUsage(stdout)
 		return engine.ExitSuccess
 	}

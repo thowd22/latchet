@@ -1,0 +1,34 @@
+name: latchet-dogfood
+# Real-world test: latchet builds and tests itself.
+# Exercises: per-job containers, parallel jobs, needs ordering,
+# explicit checkout (latchet has no implicit checkout), workspace
+# inheritance (build reuses test's checkout), and built-in LATCHET_* vars.
+
+jobs:
+  vet:
+    container: golang:1.22
+    steps:
+      - name: checkout
+        run: git clone --depth 1 https://github.com/thowd22/latchet .
+      - name: go vet
+        run: go vet ./...
+
+  test:
+    container: golang:1.22
+    steps:
+      - name: checkout
+        run: git clone --depth 1 https://github.com/thowd22/latchet .
+      - name: go test
+        run: go test ./...
+
+  build:
+    container: golang:1.22
+    needs: [vet, test]
+    inherit: test            # reuse test's already-checked-out /workspace
+    steps:
+      - name: build binary
+        run: go build -o latchet ./cmd/latchet
+      - name: smoke test
+        run: ./latchet -version
+      - name: show built-in vars
+        run: echo "run=$LATCHET_RUN_ID job=$LATCHET_JOB_ID branch=$LATCHET_GIT_BRANCH sha=$LATCHET_GIT_SHA"

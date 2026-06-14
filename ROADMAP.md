@@ -32,6 +32,13 @@ pass before implementation.
   job to proceed past a failed step.
 - **Configurable `shell:`** — v1 hardcodes `sh -c`; allow `bash` etc. per
   job/step.
+- **Shared dependency cache mount** — a persistent, cross-job cache directory
+  bind-mounted into each container (e.g. Go module cache, npm, pip) so jobs
+  don't re-download dependencies every run. Today each job starts with an
+  empty `/workspace` and no shared cache; `inherit:` hands files to a single
+  child but is not a general cache. Needs a design pass: cache location
+  per language/runtime, key/scope, and concurrent-write safety across
+  parallel jobs.
 - ~~**Built-in pipeline env vars**~~ — **shipped** (`internal/builtinenv`).
   Values latchet injects into every step
   automatically, before user-defined `env:` merges on top (so they can be

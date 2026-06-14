@@ -1,9 +1,43 @@
 package runtime
 
 import (
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestPullErrorIncludesCapturedOutput(t *testing.T) {
+	base := errors.New("exit status 125")
+	captured := `Error: short-name "golang:1.22" did not resolve to an alias`
+
+	got := pullError("golang:1.22", base, captured)
+	if !strings.Contains(got.Error(), captured) {
+		t.Errorf("pullError dropped diagnostic; got %q", got.Error())
+	}
+	if !errors.Is(got, base) {
+		t.Errorf("pullError must wrap the underlying error")
+	}
+
+	// No captured output -> single-line message, no trailing newline+blank.
+	bare := pullError("alpine:3.19", base, "   \n  ")
+	if strings.Contains(bare.Error(), "\n") {
+		t.Errorf("pullError with empty capture should be one line; got %q", bare.Error())
+	}
+}
+
+func TestTailWriterKeepsLastBytes(t *testing.T) {
+	w := &tailWriter{max: 5}
+	w.Write([]byte("abcdefghij"))
+	if got := w.String(); got != "fghij" {
+		t.Errorf("tailWriter = %q, want %q", got, "fghij")
+	}
+	w2 := &tailWriter{max: 100}
+	w2.Write([]byte("short"))
+	if got := w2.String(); got != "short" {
+		t.Errorf("tailWriter = %q, want %q", got, "short")
+	}
+}
 
 func TestCreateArgs(t *testing.T) {
 	got := createArgs("latchet-run1-build", "alpine:3.19", "/tmp/latchet/run1/build")

@@ -1,0 +1,42 @@
+name: latchet-features
+# Exercises: all 8 injected LATCHET_* vars, 4-level env precedence,
+# builtin override via env, default step name, scalar needs.
+env:
+  PREC: workflow          # lowest user level
+  ONLY_WF: wf-only
+jobs:
+  a:
+    container: alpine:3.19
+    env:
+      PREC: job             # overrides workflow
+      ONLY_JOB: job-only
+    steps:
+      - run: echo "NAME_DEFAULT ok"           # no name -> defaults to "step 1"
+      - name: prec-step
+        env:
+          PREC: step                          # overrides job -> highest
+        run: echo "PREC_STEP=$PREC"
+      - name: prec-nostep
+        run: echo "PREC_JOB=$PREC ONLY_WF=$ONLY_WF ONLY_JOB=$ONLY_JOB"
+      - name: builtins
+        run: |
+          echo "WS=$LATCHET_WORKSPACE"
+          echo "RUN=$LATCHET_RUN_ID"
+          echo "JOB=$LATCHET_JOB_ID"
+          echo "URL=$LATCHET_GIT_URL"
+          echo "BRANCH=$LATCHET_GIT_BRANCH"
+          echo "TAG=$LATCHET_GIT_TAG"
+          echo "SHA=$LATCHET_GIT_SHA"
+          echo "REF=$LATCHET_GIT_REF"
+      - name: builtin-override
+        env:
+          LATCHET_JOB_ID: FAKED               # user env can override a builtin
+        run: echo "OVERRIDE=$LATCHET_JOB_ID"
+      - name: ws-assert
+        run: test "$LATCHET_WORKSPACE" = /workspace && test "$(pwd)" = /workspace && echo "WS_ASSERT ok"
+  b:
+    container: alpine:3.19
+    needs: a                                   # scalar needs (not a list)
+    steps:
+      - name: scalar-needs
+        run: echo "SCALAR_NEEDS ok"

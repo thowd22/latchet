@@ -90,6 +90,29 @@ jobs:
 - Unknown keys (`uses`, `strategy`, `runs-on`, ...) are rejected — they
   are not supported.
 
+## Checking out your code
+
+latchet does **not** check out your repository for you. Every job starts
+with an **empty** `/workspace`, and there is no `actions/checkout`
+equivalent (`uses` is unsupported). If a job needs your source, clone it
+yourself as the first step:
+
+```yaml
+jobs:
+  test:
+    container: golang:1.22
+    steps:
+      - name: checkout
+        run: git clone --depth 1 "$LATCHET_GIT_URL" .
+      - run: go test ./...
+```
+
+`$LATCHET_GIT_URL` is injected automatically (see [Built-in step
+variables](#built-in-step-variables)); pin a commit with `$LATCHET_GIT_SHA`
+if you need the exact revision latchet recorded. To avoid re-cloning in
+every downstream job, hand a checked-out workspace to a child job with
+`inherit:` (see [Sharing files between jobs](#sharing-files-between-jobs)).
+
 ## Built-in step variables
 
 latchet injects a set of `LATCHET_*` variables into every step before your
@@ -160,6 +183,16 @@ preferred). Override with `LATCHET_RUNTIME=podman`.
 | `LATCHET_LOG_DIR` | base directory for log files (default per XDG / `~/.local/state/latchet`) |
 
 A failed run always keeps its workspace and prints the path.
+
+## Limitations
+
+- **No dependency cache between jobs.** Each job runs in its own container
+  with a fresh `/workspace`, so package/build caches (Go modules, npm,
+  pip, …) are not shared — every job re-downloads its dependencies. Warm a
+  cache within a single job, or hand artifacts to a child job with
+  `inherit:`. A shared cache mount is on the [roadmap](ROADMAP.md).
+- **No implicit checkout** — clone your repo yourself (see [Checking out
+  your code](#checking-out-your-code)).
 
 ## Documentation
 
