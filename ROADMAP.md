@@ -230,6 +230,16 @@ guarantees (Nix-grade) are out of scope and always will be.
 
 ### Subsystem 3 — Sigstore signing (small once `cosign` is on the host)
 
+> **Shipped (key-based local path)** (`internal/signer`, wired in
+> `engine.Run`). When `LATCHET_COSIGN_KEY` is set and `cosign` is on PATH,
+> the run signs `provenance.json` with `cosign sign-blob`
+> (`--tlog-upload=false` by default; `LATCHET_COSIGN_TLOG=1` opts into Rekor),
+> writing `provenance.json.sig`. Soft dependency: missing cosign or no key
+> leaves the attestation unsigned; best-effort, never changes the exit code.
+> **Still open:** the keyless Fulcio/OIDC release path below (no key on disk),
+> which lands with the **Release pipeline** item; and `cosign attest`/OCI
+> signing once the release pipeline pushes images.
+
 After provenance emission, optionally sign the attestation and publish
 to a transparency log:
 
@@ -360,13 +370,13 @@ Done so far (cont.):
 5. ~~**Supply chain & attestation, Subsystem 1**~~ (provenance emission) —
    shipped (`internal/provenance`); every run emits a SLSA v1.0
    `provenance.json` → SLSA L1.
+6. ~~**Supply chain & attestation, Subsystem 3**~~ (sigstore signing,
+   key-based local path) — shipped (`internal/signer`); signs
+   `provenance.json` via cosign when `LATCHET_COSIGN_KEY` is set. The
+   keyless release-pipeline path remains open (see Subsystem 3 note).
 
 Next picks (in rough order of value-per-effort):
-1. **Supply chain & attestation, Subsystem 3** (sigstore signing) — the
-   trivial follow-on now that Subsystem 1 has shipped: sign
-   `provenance.json` with `cosign` when present (soft dependency), else
-   emit unsigned. Lands SLSA L2 on releases built in GitHub Actions.
-2. **Global `latchet-ci.yml` + `latchet watch`** — turns latchet into a
+1. **Global `latchet-ci.yml` + `latchet watch`** — turns latchet into a
    minimal CI server you can run from cron.
 3. **`uses` / reusable actions** — still the largest single item; do
    it once the engine is stable and the supply-chain story is in

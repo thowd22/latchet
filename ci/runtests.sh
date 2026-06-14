@@ -6,6 +6,7 @@
 set -u
 LATCHET="${LATCHET:-$HOME/latchet}"
 export LATCHET_RUNTIME="${LATCHET_RUNTIME:-podman}"
+export PATH="$HOME/.local/bin:$PATH"   # so latchet can find cosign
 TMP="$(mktemp -d)"
 PASS=0; FAIL=0
 ok()   { PASS=$((PASS+1)); printf 'PASS  %s\n' "$1"; }
@@ -82,6 +83,32 @@ has "invocationId == run id"     "$PROV" "$RID"
 has "resolved image digest pinned" "$PROV" "@sha256:"
 has "builder id stamped"         "$PROV" "latchet.dev/builders/latchet@"
 grep -qE '"sha256": "[0-9a-f]{64}"' "$PROV" && ok "subject sha256 present" || bad "subject sha256 present"
+[ ! -f "$PROV.bundle" ] && ok "unsigned by default (no LATCHET_COSIGN_KEY)" || bad "unsigned by default (no LATCHET_COSIGN_KEY)"
+
+echo "===== PROVENANCE SIGNING (cosign) ====="
+if command -v cosign >/dev/null 2>&1; then
+  KEYDIR="$TMP/keys"; mkdir -p "$KEYDIR"
+  ( cd "$KEYDIR" && COSIGN_PASSWORD="" cosign generate-key-pair >/dev/null 2>&1 )
+  SLOGS="$TMP/logs-sign"
+  COSIGN_PASSWORD="" LATCHET_COSIGN_KEY="$KEYDIR/cosign.key" LATCHET_LOG_DIR="$SLOGS" \
+    "$LATCHET" -file ci/features.yml >"$TMP/signrun" 2>&1
+  SPROV="$SLOGS/latest/provenance.json"
+  [ -f "$SPROV.bundle" ] && ok "provenance.json.bundle written" || { bad "provenance.json.bundle written"; sed 's/^/      /' "$TMP/signrun"; }
+  grep -qF "provenance signed" "$TMP/signrun" && ok "signing logged" || bad "signing logged"
+  if cosign verify-blob --key "$KEYDIR/cosign.pub" --bundle "$SPROV.bundle" --insecure-ignore-tlog=true "$SPROV" >/dev/null 2>&1; then
+    ok "cosign verify-blob succeeds"
+  else
+    bad "cosign verify-blob succeeds"
+  fi
+  printf 'tampered\n' >> "$SPROV"   # corrupt the signed file
+  if cosign verify-blob --key "$KEYDIR/cosign.pub" --bundle "$SPROV.bundle" --insecure-ignore-tlog=true "$SPROV" >/dev/null 2>&1; then
+    bad "tamper detected (verify must fail on modified file)"
+  else
+    ok "tamper detected (verify fails on modified file)"
+  fi
+else
+  echo "SKIP  cosign not installed (signing checks skipped)"
+fi
 
 echo "===== FEATURE RUN (tag checkout: GIT_TAG / GIT_REF) ====="
 git -C "$HOME/latchet-src" fetch -q --tags 2>/dev/null

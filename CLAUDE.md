@@ -76,6 +76,10 @@ hermetically.
 ## Workflow-author-facing env vars (read by the binary)
 
 `LATCHET_RUNTIME`, `LATCHET_WORKSPACE_ROOT`, `LATCHET_KEEP_WORKSPACE`,
-`LATCHET_LOG_DIR`. Distinct from the output-only `LATCHET_*` vars
-`builtinenv` *injects* into steps (`LATCHET_WORKSPACE`, `LATCHET_RUN_ID`,
-`LATCHET_JOB_ID`, `LATCHET_GIT_*`).
+`LATCHET_LOG_DIR`, `LATCHET_COSIGN_KEY`, `LATCHET_COSIGN_TLOG`. Distinct from
+the output-only `LATCHET_*` vars `builtinenv` *injects* into steps
+(`LATCHET_WORKSPACE`, `LATCHET_RUN_ID`, `LATCHET_JOB_ID`, `LATCHET_GIT_*`).
+
+Each run emits `<logdir>/provenance.json` (SLSA v1.0, `internal/provenance`),
+optionally signed via cosign (`internal/signer`) when `LATCHET_COSIGN_KEY` is
+set. Both are best-effort and never change the exit code.

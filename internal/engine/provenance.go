@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/thowd22/latchet/internal/config"
 	"github.com/thowd22/latchet/internal/logstore"
 	"github.com/thowd22/latchet/internal/provenance"
+	"github.com/thowd22/latchet/internal/signer"
 	"github.com/thowd22/latchet/internal/version"
 	"github.com/thowd22/latchet/internal/workspace"
 )
@@ -20,7 +22,7 @@ import (
 // best-effort: any failure is reported as a warning and never changes the
 // run's exit code. Must be called after the run completes but before the
 // workspace is cleaned, so job artifacts are still on disk to hash.
-func emitProvenance(ws *workspace.Run, ls *logstore.Run, wf *config.Workflow, opts Options, git builtinenv.Git, images *imageCache, maxParallel int, started, finished time.Time, out, warn io.Writer) {
+func emitProvenance(ctx context.Context, ws *workspace.Run, ls *logstore.Run, wf *config.Workflow, opts Options, git builtinenv.Git, images *imageCache, maxParallel int, started, finished time.Time, out, warn io.Writer) {
 	wfBytes, err := os.ReadFile(opts.File)
 	if err != nil {
 		fmt.Fprintf(warn, "latchet: provenance skipped: %v\n", err)
@@ -100,6 +102,31 @@ func emitProvenance(ws *workspace.Run, ls *logstore.Run, wf *config.Workflow, op
 	} else {
 		fmt.Fprintf(out, "latchet: provenance at %s\n", path)
 	}
+
+	signProvenance(ctx, path, out, warn)
+}
+
+// signProvenance signs the provenance file with cosign when a signing key is
+// configured via LATCHET_COSIGN_KEY. Best-effort: a missing cosign or a
+// signing failure is reported as a warning and never changes the exit code.
+// LATCHET_COSIGN_TLOG=1 opts into uploading the signature to a Rekor
+// transparency log (off by default, so signing works offline).
+func signProvenance(ctx context.Context, provPath string, out, warn io.Writer) {
+	keyPath := os.Getenv("LATCHET_COSIGN_KEY")
+	if keyPath == "" {
+		return // signing not requested
+	}
+	if !signer.Available() {
+		fmt.Fprintf(warn, "latchet: cosign not found; attestation unsigned\n")
+		return
+	}
+	tlog := os.Getenv("LATCHET_COSIGN_TLOG") == "1"
+	sigPath, err := signer.SignBlob(ctx, keyPath, provPath, tlog)
+	if err != nil {
+		fmt.Fprintf(warn, "latchet: signing provenance: %v\n", err)
+		return
+	}
+	fmt.Fprintf(out, "latchet: provenance signed -> %s\n", sigPath)
 }
 
 // mergeEnv overlays env levels low-to-high precedence into a single map, the

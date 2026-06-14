@@ -114,7 +114,7 @@ func Run(opts Options) int {
 	}
 
 	// Emit SLSA provenance before cleanup, while job artifacts still exist.
-	emitProvenance(ws, ls, wf, opts, git, images, maxParallel, started, finished, opts.Stdout, opts.Stderr)
+	emitProvenance(context.Background(), ws, ls, wf, opts, git, images, maxParallel, started, finished, opts.Stdout, opts.Stderr)
 
 	if kept := ws.Cleanup(exit != ExitSuccess); kept != "" {
 		fmt.Fprintf(opts.Stdout, "\nworkspace kept at %s\n", kept)

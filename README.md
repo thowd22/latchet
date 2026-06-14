@@ -190,6 +190,35 @@ infrastructure error.
 > log directory accordingly; don't publish `provenance.json` from a run whose
 > env carried secrets.
 
+### Signing the attestation
+
+Set `LATCHET_COSIGN_KEY` to a [cosign](https://docs.sigstore.dev/) private key
+and, when `cosign` is on `PATH`, latchet signs the provenance after writing
+it, producing a Sigstore bundle `provenance.json.bundle` alongside it:
+
+```sh
+COSIGN_PASSWORD=… LATCHET_COSIGN_KEY=cosign.key latchet
+# -> latchet: provenance signed -> …/provenance.json.bundle
+```
+
+cosign reads the key's password from `COSIGN_PASSWORD` (its own variable).
+Signing is **offline by default** (`--tlog-upload=false`); set
+`LATCHET_COSIGN_TLOG=1` to also publish the signature to a Rekor transparency
+log. cosign is a **soft dependency**: if it's missing, or no key is
+configured, the run continues and the attestation is simply left unsigned —
+signing never changes a run's exit code. Verify the bundle with:
+
+```sh
+cosign verify-blob --key cosign.pub \
+  --bundle provenance.json.bundle \
+  --insecure-ignore-tlog=true provenance.json
+```
+
+Requires **cosign v3+** (the offline key-based flow uses
+`--use-signing-config=false`). Keyless signing (Fulcio/OIDC, no key on disk)
+is the intended path for the release pipeline running in GitHub Actions; local
+runs use the key-based flow above so they work unattended.
+
 ## Sharing files between jobs
 
 A job may declare `inherit: <parent-id>` to start with the named parent's
@@ -214,6 +243,8 @@ preferred). Override with `LATCHET_RUNTIME=podman`.
 | `LATCHET_WORKSPACE_ROOT` | where run workspaces are created (default `<tmp>/latchet`) |
 | `LATCHET_KEEP_WORKSPACE=1` | keep the workspace even on success |
 | `LATCHET_LOG_DIR` | base directory for log files (default per XDG / `~/.local/state/latchet`) |
+| `LATCHET_COSIGN_KEY` | path to a cosign private key; when set (and `cosign` is on `PATH`), the run's `provenance.json` is signed (see [Provenance](#provenance-slsa)) |
+| `LATCHET_COSIGN_TLOG=1` | also upload the signature to a Rekor transparency log (off by default, so signing works offline) |
 
 A failed run always keeps its workspace and prints the path.
 
