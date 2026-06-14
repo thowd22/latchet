@@ -80,6 +80,10 @@ func rmArgs(name string) []string       { return []string{"rm", "-f", name} }
 func inspectArgs(image string) []string { return []string{"image", "inspect", image} }
 func pullArgs(image string) []string    { return []string{"pull", image} }
 
+func digestArgs(image string) []string {
+	return []string{"image", "inspect", "--format", "{{index .RepoDigests 0}}", image}
+}
+
 // --- execution ---
 
 // ImageExists reports whether the image is already present locally, so the
@@ -88,6 +92,23 @@ func (r *Runtime) ImageExists(ctx context.Context, image string) bool {
 	c := exec.CommandContext(ctx, r.Bin, inspectArgs(image)...)
 	c.Stdout, c.Stderr = io.Discard, io.Discard
 	return c.Run() == nil
+}
+
+// ImageDigest returns the digest-pinned reference of a locally-present image
+// (e.g. "docker.io/library/golang@sha256:..."), read from its first
+// RepoDigest. Used to record resolvedDependencies in provenance. Returns ""
+// with no error when the image has no RepoDigest (e.g. a locally-built image
+// never pushed/pulled) so provenance emission degrades gracefully.
+func (r *Runtime) ImageDigest(ctx context.Context, image string) (string, error) {
+	out, err := exec.CommandContext(ctx, r.Bin, digestArgs(image)...).Output()
+	if err != nil {
+		return "", fmt.Errorf("inspecting image %s: %w", image, err)
+	}
+	digest := strings.TrimSpace(string(out))
+	if digest == "<no value>" { // template produced nothing
+		return "", nil
+	}
+	return digest, nil
 }
 
 // Pull fetches an image, streaming progress to out. On failure the runtime's

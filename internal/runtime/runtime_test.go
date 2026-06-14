@@ -88,6 +88,9 @@ func TestSimpleArgs(t *testing.T) {
 	if got := pullArgs("img"); !reflect.DeepEqual(got, []string{"pull", "img"}) {
 		t.Errorf("pullArgs = %v", got)
 	}
+	if got := digestArgs("img"); !reflect.DeepEqual(got, []string{"image", "inspect", "--format", "{{index .RepoDigests 0}}", "img"}) {
+		t.Errorf("digestArgs = %v", got)
+	}
 }
 
 func TestDetect(t *testing.T) {
