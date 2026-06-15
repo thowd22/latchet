@@ -12,6 +12,34 @@ pass before implementation.
   The largest item: needs action fetching/resolution and a substantially bigger
   runner. This is what would make latchet workflows reusable rather than purely
   inline.
+
+#### Prebuilt actions / build steps
+
+A catalog of pre-packaged, reusable steps a workflow can invoke — the concrete
+payload of the `uses` item above. Each would be a versioned unit of common
+build/publish behavior so authors don't hand-roll it inline. The list is just
+getting started; seeds below (signed OCI builds first):
+
+- **Signed OCI image build** *(prebuild action)* — build a container image
+  from a Dockerfile + context, push it to a registry, and `cosign attest` the
+  resulting image keyless (Fulcio/OIDC + Rekor), reusing the signing path
+  already shipped for releases (`internal/signer`,
+  `.github/workflows/release.yml`). This is what finally gives the
+  `cosign attest`/OCI signing deferred under
+  [Subsystem 3](#subsystem-3--sigstore-signing-small-once-cosign-is-on-the-host)
+  an artifact to sign — latchet does not build or push images today. Open
+  design: builder backend (`docker build` / `buildah` / BuildKit), registry
+  auth, and whether the image digest + attestation fold into the run's
+  `provenance.json` as a subject / resolvedDependency.
+- **Checkout** *(prebuild action)* — a built-in repository checkout, removing
+  the "every job clones its own source" boilerplate (latchet has no implicit
+  checkout today; see [README](README.md#checking-out-your-code)). Clones
+  `LATCHET_GIT_URL` at `LATCHET_GIT_SHA` into `/workspace`.
+- **Dependency cache** *(prebuild action)* — restore/save a keyed cache
+  (Go modules, npm, pip, …); the step form of the
+  [shared cache mount](#workflow-features) item.
+- _(more to come — SBOM generation (`syft`), artifact upload/download, etc.)_
+
 - **Parallel job execution** — run jobs whose `needs` are all satisfied
   concurrently instead of sequentially. The DAG already exposes the graph, so
   this is additive; the main work is per-job log prefixing/buffering so streams
@@ -248,8 +276,9 @@ guarantees (Nix-grade) are out of scope and always will be.
 > (`.github/workflows/release.yml`): on a tag, GitHub's OIDC mints a Fulcio
 > cert (no key on disk) and `cosign sign-blob` signs `SHA256SUMS` into a Rekor
 > bundle shipped as a release asset → SLSA L2 for releases. **Still open:**
-> `cosign attest`/OCI signing, once the release pipeline pushes container
-> images.
+> `cosign attest`/OCI signing — tracked as the **Signed OCI image build**
+> entry under [Prebuilt actions / build steps](#prebuilt-actions--build-steps),
+> since latchet needs to build/push an image before there's anything to attest.
 
 After provenance emission, optionally sign the attestation and publish
 to a transparency log:
@@ -412,7 +441,8 @@ Done so far (cont.):
 The supply-chain arc (Subsystems 1–4 + keyless release signing) is now
 complete. The only remaining pieces are genuinely out of scope or dependent on
 features that don't exist yet: `cosign attest`/OCI signing needs the engine to
-push container images (it doesn't); `diffoscope` byte-diffing in `verify
+build/push container images (it doesn't) — now tracked as the **Signed OCI
+image build** prebuilt action; `diffoscope` byte-diffing in `verify
 --explain` needs the original artifact bytes, which the manifest deliberately
 records only as hashes.
 
