@@ -82,4 +82,6 @@ the output-only `LATCHET_*` vars `builtinenv` *injects* into steps
 
 Each run emits `<logdir>/provenance.json` (SLSA v1.0, `internal/provenance`),
 optionally signed via cosign (`internal/signer`) when `LATCHET_COSIGN_KEY` is
-set. Both are best-effort and never change the exit code.
+set. Both are best-effort and never change the exit code. `latchet verify
+<provenance.json>` (`engine.Verify`) re-derives a run and compares subjects
+(strict/lax), writing `verification.json`.

@@ -110,6 +110,32 @@ else
   echo "SKIP  cosign not installed (signing checks skipped)"
 fi
 
+echo "===== VERIFY (re-derive & compare) ====="
+VLOGS="$TMP/logs-verifyrun"
+LATCHET_LOG_DIR="$VLOGS" "$LATCHET" -file ci/verify-demo.yml >/dev/null 2>&1
+VPROV="$VLOGS/latest/provenance.json"
+[ -f "$VPROV" ] && ok "verify: demo run produced provenance" || bad "verify: demo run produced provenance"
+
+# Faithful re-run: both lax and strict verify.
+ec "verify lax (faithful) -> 0"    0 env LATCHET_LOG_DIR="$TMP/v1" "$LATCHET" verify --file ci/verify-demo.yml "$VPROV"
+ec "verify strict (faithful) -> 0" 0 env LATCHET_LOG_DIR="$TMP/v2" "$LATCHET" verify --strict --file ci/verify-demo.yml "$VPROV"
+has "verify reports VERIFIED" "$TMP/out" "VERIFIED"
+[ -f "$TMP/v1/latest/verification.json" ] && ok "verification.json written" || bad "verification.json written"
+
+# Tampered subject digest: strict fails, lax tolerates content drift.
+ZERO=0000000000000000000000000000000000000000000000000000000000000000
+sed "0,/\"sha256\": \"[0-9a-f]\{64\}\"/s//\"sha256\": \"$ZERO\"/" "$VPROV" > "$TMP/prov-baddigest.json"
+ec "verify strict (tampered digest) -> 1" 1 env LATCHET_LOG_DIR="$TMP/v3" "$LATCHET" verify --strict --file ci/verify-demo.yml "$TMP/prov-baddigest.json"
+ec "verify lax (tampered digest) -> 0"    0 env LATCHET_LOG_DIR="$TMP/v4" "$LATCHET" verify --file ci/verify-demo.yml "$TMP/prov-baddigest.json"
+
+# Tampered subject name: lax fails (a claimed artifact is never reproduced).
+sed 's#gen/artifact.txt#gen/ghost.txt#' "$VPROV" > "$TMP/prov-badname.json"
+ec "verify lax (missing subject) -> 1" 1 env LATCHET_LOG_DIR="$TMP/v5" "$LATCHET" verify --file ci/verify-demo.yml "$TMP/prov-badname.json"
+
+# Workflow file differs from the manifest's recorded SHA: verification fails.
+cp ci/verify-demo.yml "$TMP/wf-mod.yml"; printf '# tampered recipe\n' >> "$TMP/wf-mod.yml"
+ec "verify (workflow SHA mismatch) -> 1" 1 env LATCHET_LOG_DIR="$TMP/v6" "$LATCHET" verify --file "$TMP/wf-mod.yml" "$VPROV"
+
 echo "===== FEATURE RUN (tag checkout: GIT_TAG / GIT_REF) ====="
 git -C "$HOME/latchet-src" fetch -q --tags 2>/dev/null
 git -C "$HOME/latchet-src" -c advice.detachedHead=false checkout -q v0.4.0

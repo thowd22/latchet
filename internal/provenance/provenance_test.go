@@ -137,6 +137,38 @@ func TestWriteRoundTrips(t *testing.T) {
 	}
 }
 
+func TestLoadAndAccessors(t *testing.T) {
+	dir := t.TempDir()
+	p, err := Write(dir, Build(sampleInput()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if st.WorkflowPath() != "latchet.yml" || st.WorkflowDigest() != "ff00" {
+		t.Errorf("workflow accessors: path=%q digest=%q", st.WorkflowPath(), st.WorkflowDigest())
+	}
+	imgs := st.ResolvedImages()
+	if imgs["golang:1.22"] != "docker.io/library/golang@sha256:bbb" {
+		t.Errorf("ResolvedImages = %v", imgs)
+	}
+	subs := st.SubjectDigests()
+	if subs["build/a.bin"] != "1" || subs["build/z.bin"] != "2" {
+		t.Errorf("SubjectDigests = %v", subs)
+	}
+}
+
+func TestLoadRejectsNonProvenance(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "x.json")
+	mustWrite(t, p, `{"_type":"https://in-toto.io/Statement/v1","predicateType":"something/else"}`)
+	if _, err := Load(p); err == nil {
+		t.Fatal("expected Load to reject a non-SLSA predicateType")
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

@@ -219,6 +219,39 @@ Requires **cosign v3+** (the offline key-based flow uses
 is the intended path for the release pipeline running in GitHub Actions; local
 runs use the key-based flow above so they work unattended.
 
+### Verifying a run
+
+`latchet verify` re-derives a build from its provenance and compares the
+result — so anyone can independently re-run someone else's claimed build:
+
+```sh
+latchet verify provenance.json              # lax (default)
+latchet verify --strict provenance.json     # require bit-for-bit match
+latchet verify --explain provenance.json    # print per-subject mismatch detail
+latchet verify --file latchet.yml provenance.json   # override workflow path
+```
+
+It (1) checks the on-disk workflow's SHA256 matches the manifest — you can't
+reproduce a build from a different recipe; (2) re-runs the workflow in a fresh
+workspace with each image **pinned to the digest** recorded in
+`resolvedDependencies`; and (3) re-hashes the artifacts and compares them to
+the manifest's subjects, writing a `verification.json` report.
+
+- **lax** (default) — passes when every claimed subject is reproduced *by
+  name*; differing content is reported as a warning. Honest for the common
+  case where builds are only partially reproducible.
+- **`--strict`** — every subject must match bit-for-bit; any mismatch, missing,
+  or extra subject fails. Only meaningful for fully-reproducible workflows.
+
+Exit codes: `0` verified · `1` verification failed · `2` bad
+manifest/workflow · `3` runtime error.
+
+> Most real workflows aren't bit-for-bit reproducible (timestamps, embedded
+> build paths, VCS metadata), so `--strict` is for workflows deliberately made
+> deterministic. `--explain` lists expected-vs-actual hashes; true byte-level
+> diffing of artifacts is out of scope (the manifest records hashes, not the
+> original bytes).
+
 ## Sharing files between jobs
 
 A job may declare `inherit: <parent-id>` to start with the named parent's

@@ -41,3 +41,15 @@ func TestUnknownFlagExitsConfig(t *testing.T) {
 		t.Fatalf("run(-nonexistent) = %d, want %d", code, engine.ExitConfig)
 	}
 }
+
+// The verify subcommand dispatches without touching the container runtime when
+// the manifest is missing or unreadable (both config errors).
+func TestVerifySubcommandDispatch(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"verify"}, &stdout, &stderr); code != engine.ExitConfig {
+		t.Errorf("verify (no arg) = %d, want %d", code, engine.ExitConfig)
+	}
+	if code := run([]string{"verify", "/no/such/provenance.json"}, &stdout, &stderr); code != engine.ExitConfig {
+		t.Errorf("verify (missing file) = %d, want %d", code, engine.ExitConfig)
+	}
+}

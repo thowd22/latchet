@@ -1,0 +1,325 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/thowd22/latchet/internal/builtinenv"
+	"github.com/thowd22/latchet/internal/config"
+	"github.com/thowd22/latchet/internal/dag"
+	"github.com/thowd22/latchet/internal/log"
+	"github.com/thowd22/latchet/internal/logstore"
+	"github.com/thowd22/latchet/internal/provenance"
+	"github.com/thowd22/latchet/internal/runtime"
+	"github.com/thowd22/latchet/internal/scheduler"
+	"github.com/thowd22/latchet/internal/workspace"
+)
+
+// VerifyOptions configures a `latchet verify` invocation.
+type VerifyOptions struct {
+	ManifestPath string // path to provenance.json
+	File         string // workflow override; default is the path recorded in the manifest
+	Strict       bool   // require every subject to match bit-for-bit
+	Explain      bool   // print per-subject mismatch detail
+	MaxParallel  int
+	Stdout       io.Writer
+	Stderr       io.Writer
+}
+
+// VerificationReport is written to <logdir>/verification.json.
+type VerificationReport struct {
+	Manifest string            `json:"manifest"`
+	Mode     string            `json:"mode"` // strict | lax
+	Result   string            `json:"result"`
+	Workflow workflowCheck     `json:"workflow"`
+	Subjects subjectComparison `json:"subjects"`
+}
+
+type workflowCheck struct {
+	Path        string `json:"path"`
+	ExpectedSHA string `json:"expectedSha256"`
+	ActualSHA   string `json:"actualSha256"`
+	Match       bool   `json:"match"`
+}
+
+type subjectComparison struct {
+	Matched    []string         `json:"matched"`
+	Mismatched []mismatchDetail `json:"mismatched"`
+	Missing    []string         `json:"missing"` // in manifest, not reproduced
+	Extra      []string         `json:"extra"`   // reproduced, not in manifest
+}
+
+type mismatchDetail struct {
+	Name     string `json:"name"`
+	Expected string `json:"expected"`
+	Actual   string `json:"actual"`
+}
+
+// Verify re-derives the build described by a provenance manifest and compares
+// the result to the manifest's recorded subjects. It re-runs the recorded
+// workflow in a fresh workspace with each image pinned to the digest recorded
+// in resolvedDependencies, re-hashes the resulting artifacts, and reports.
+//
+// Exit codes: 0 verified, 1 verification failed (mismatch / workflow differs /
+// a job failed), 2 bad manifest or workflow, 3 runtime/infra error.
+func Verify(vo VerifyOptions) int {
+	if vo.Stdout == nil {
+		vo.Stdout = os.Stdout
+	}
+	if vo.Stderr == nil {
+		vo.Stderr = os.Stderr
+	}
+	out, warn := vo.Stdout, vo.Stderr
+
+	st, err := provenance.Load(vo.ManifestPath)
+	if err != nil {
+		fmt.Fprintf(warn, "latchet verify: %v\n", err)
+		return ExitConfig
+	}
+
+	wfPath := st.WorkflowPath()
+	if vo.File != "" {
+		wfPath = vo.File
+	}
+	if wfPath == "" {
+		fmt.Fprintf(warn, "latchet verify: manifest records no workflow path; pass --file\n")
+		return ExitConfig
+	}
+
+	wfBytes, err := os.ReadFile(wfPath)
+	if err != nil {
+		fmt.Fprintf(warn, "latchet verify: %v\n", err)
+		return ExitConfig
+	}
+	expectedSHA := st.WorkflowDigest()
+	actualSHA := provenance.SHA256Hex(wfBytes)
+
+	// Recipe identity: a build cannot be reproduced from a different workflow.
+	if expectedSHA == "" || actualSHA != expectedSHA {
+		fmt.Fprintf(out, "latchet verify: FAILED — workflow file does not match the manifest\n")
+		fmt.Fprintf(out, "  workflow:        %s\n  expected sha256: %s\n  actual sha256:   %s\n",
+			wfPath, dashIfEmpty(expectedSHA), actualSHA)
+		return ExitFailed
+	}
+
+	wf, err := config.Load(wfPath)
+	if err != nil {
+		fmt.Fprintf(warn, "latchet verify: %v\n", err)
+		return ExitConfig
+	}
+	if err := wf.Validate(); err != nil {
+		fmt.Fprintf(warn, "latchet verify: %v\n", err)
+		return ExitConfig
+	}
+
+	// Pin each job's image to the digest recorded at the original run.
+	pinned := st.ResolvedImages()
+	ids := sortedJobIDs(wf)
+	for _, id := range ids {
+		job := wf.Jobs[id]
+		if uri, ok := pinned[job.Container]; ok && uri != "" {
+			job.Container = uri
+		} else {
+			fmt.Fprintf(warn, "latchet verify: no recorded digest for image %q (job %q); using as-is\n", job.Container, id)
+		}
+	}
+
+	r, err := runtime.Detect()
+	if err != nil {
+		fmt.Fprintf(warn, "latchet verify: %v\n", err)
+		return ExitInfra
+	}
+	g, err := dag.Build(wf.Deps())
+	if err != nil {
+		fmt.Fprintf(warn, "latchet verify: %v\n", err)
+		return ExitConfig
+	}
+	ws, err := workspace.New()
+	if err != nil {
+		fmt.Fprintf(warn, "latchet verify: %v\n", err)
+		return ExitInfra
+	}
+	ls, err := logstore.New(ws.ID)
+	if err != nil {
+		fmt.Fprintf(warn, "latchet verify: %v\n", err)
+		return ExitInfra
+	}
+
+	fmt.Fprintf(out, "latchet verify: re-running %s (run %s) to re-derive subjects\n", wfPath, ws.ID)
+
+	images := newImageCache()
+	maxParallel := vo.MaxParallel
+	if maxParallel < 1 {
+		maxParallel = 1
+	}
+	// The re-run's own git facts do not affect artifact hashes.
+	git := builtinenv.Git{}
+
+	results, infraErr := scheduler.Run(context.Background(), g, scheduler.Options{
+		MaxParallel: maxParallel,
+		RunJob: func(ctx context.Context, jobID string) (scheduler.Result, error) {
+			return runOne(ctx, r, ws, ls, wf, jobID, images, out, maxParallel, git)
+		},
+		OnSkip: func(jobID, reason string) { log.JobSkip(out, jobID, reason) },
+	})
+	if infraErr != nil {
+		fmt.Fprintf(warn, "latchet verify: %v\n", infraErr)
+		if kept := ws.Cleanup(true); kept != "" {
+			fmt.Fprintf(warn, "latchet verify: workspace kept at %s\n", kept)
+		}
+		return ExitInfra
+	}
+
+	runFailed := false
+	for _, res := range results {
+		if res.Status == scheduler.StatusFailed {
+			runFailed = true
+			break
+		}
+	}
+
+	got := collectSubjects(ws, ids, warn)
+	cmp := compareSubjects(st.SubjectDigests(), got)
+
+	verified := !runFailed && len(cmp.Missing) == 0
+	if vo.Strict {
+		verified = verified && len(cmp.Mismatched) == 0 && len(cmp.Extra) == 0
+	}
+
+	report := VerificationReport{
+		Manifest: vo.ManifestPath,
+		Mode:     modeName(vo.Strict),
+		Result:   resultName(verified),
+		Workflow: workflowCheck{Path: wfPath, ExpectedSHA: expectedSHA, ActualSHA: actualSHA, Match: true},
+		Subjects: cmp,
+	}
+	reportPath, werr := writeReport(ls.Dir, report)
+	if werr != nil {
+		fmt.Fprintf(warn, "latchet verify: writing report: %v\n", werr)
+	}
+
+	printVerifySummary(out, vo, report, reportPath, runFailed)
+
+	ws.Cleanup(!verified) // keep the workspace on failure for inspection
+	if verified {
+		return ExitSuccess
+	}
+	return ExitFailed
+}
+
+func collectSubjects(ws *workspace.Run, ids []string, warn io.Writer) map[string]string {
+	out := map[string]string{}
+	for _, id := range ids {
+		dir, err := ws.JobDir(id)
+		if err != nil {
+			continue
+		}
+		subs, _, herr := provenance.HashTree(dir, id)
+		if herr != nil {
+			fmt.Fprintf(warn, "latchet verify: hashing %s: %v\n", id, herr)
+			continue
+		}
+		for _, s := range subs {
+			out[s.Name] = s.Digest["sha256"]
+		}
+	}
+	return out
+}
+
+func compareSubjects(want, got map[string]string) subjectComparison {
+	var c subjectComparison
+	for name, wsha := range want {
+		gsha, ok := got[name]
+		switch {
+		case !ok:
+			c.Missing = append(c.Missing, name)
+		case gsha == wsha:
+			c.Matched = append(c.Matched, name)
+		default:
+			c.Mismatched = append(c.Mismatched, mismatchDetail{Name: name, Expected: wsha, Actual: gsha})
+		}
+	}
+	for name := range got {
+		if _, ok := want[name]; !ok {
+			c.Extra = append(c.Extra, name)
+		}
+	}
+	sort.Strings(c.Matched)
+	sort.Strings(c.Missing)
+	sort.Strings(c.Extra)
+	sort.Slice(c.Mismatched, func(i, j int) bool { return c.Mismatched[i].Name < c.Mismatched[j].Name })
+	return c
+}
+
+func sortedJobIDs(wf *config.Workflow) []string {
+	ids := make([]string, 0, len(wf.Jobs))
+	for id := range wf.Jobs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func writeReport(dir string, r VerificationReport) (string, error) {
+	b, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	b = append(b, '\n')
+	p := filepath.Join(dir, "verification.json")
+	if err := os.WriteFile(p, b, 0o644); err != nil {
+		return "", err
+	}
+	return p, nil
+}
+
+func printVerifySummary(out io.Writer, vo VerifyOptions, r VerificationReport, reportPath string, runFailed bool) {
+	c := r.Subjects
+	fmt.Fprintf(out, "\nlatchet verify (%s): %s\n", r.Mode, strings.ToUpper(r.Result))
+	fmt.Fprintf(out, "  subjects: %d matched, %d mismatched, %d missing, %d extra\n",
+		len(c.Matched), len(c.Mismatched), len(c.Missing), len(c.Extra))
+	if runFailed {
+		fmt.Fprintf(out, "  note: a job failed during the re-run\n")
+	}
+	if vo.Explain {
+		for _, m := range c.Mismatched {
+			fmt.Fprintf(out, "  ~ %s\n      expected %s\n      actual   %s\n", m.Name, m.Expected, m.Actual)
+		}
+		for _, n := range c.Missing {
+			fmt.Fprintf(out, "  - missing %s\n", n)
+		}
+		for _, n := range c.Extra {
+			fmt.Fprintf(out, "  + extra   %s\n", n)
+		}
+	}
+	if reportPath != "" {
+		fmt.Fprintf(out, "  report: %s\n", reportPath)
+	}
+}
+
+func modeName(strict bool) string {
+	if strict {
+		return "strict"
+	}
+	return "lax"
+}
+
+func resultName(verified bool) string {
+	if verified {
+		return "verified"
+	}
+	return "failed"
+}
+
+func dashIfEmpty(s string) string {
+	if s == "" {
+		return "(none recorded)"
+	}
+	return s
+}

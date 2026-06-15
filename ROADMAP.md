@@ -263,6 +263,17 @@ attestation unsigned"). No hard install requirement.
 
 ### Subsystem 4 — `latchet verify <manifest>` (medium; the verifier role made real)
 
+> **Shipped (core)** (`engine.Verify`, `latchet verify` subcommand). Loads a
+> provenance.json, checks the on-disk workflow SHA matches the manifest,
+> re-runs the workflow with images pinned to the recorded digests, re-hashes
+> subjects, and compares — writing `<logdir>/verification.json`. Modes:
+> `--lax` (default; passes when every subject is reproduced by name) and
+> `--strict` (bit-for-bit). `--explain` prints expected-vs-actual hashes.
+> **Still open:** byte-level `diffoscope` diffing (needs the original artifact
+> bytes, which the manifest doesn't carry — only hashes); verifying a *signed*
+> bundle's signature as part of verify; `source`-based checkout when the
+> workflow itself doesn't clone.
+
 The standout differentiator from any other minimal CI tool: any user
 can re-derive any other user's claimed build, locally, in one command.
 
@@ -374,6 +385,10 @@ Done so far (cont.):
    key-based local path) — shipped (`internal/signer`); signs
    `provenance.json` via cosign when `LATCHET_COSIGN_KEY` is set. The
    keyless release-pipeline path remains open (see Subsystem 3 note).
+7. ~~**Supply chain & attestation, Subsystem 4**~~ (verify, core) — shipped
+   (`engine.Verify`, `latchet verify`); re-derives a run from its
+   provenance and compares subjects (strict/lax). diffoscope/--explain
+   byte-diffing and signed-bundle verification remain open.
 
 Next picks (in rough order of value-per-effort):
 1. **Global `latchet-ci.yml` + `latchet watch`** — turns latchet into a

@@ -1,0 +1,10 @@
+name: verify-demo
+# Deterministic single-artifact workflow for exercising `latchet verify`.
+# The artifact's content is fixed, so a faithful re-run reproduces it
+# bit-for-bit and `latchet verify --strict` passes.
+jobs:
+  gen:
+    container: alpine:3.19
+    steps:
+      - name: write deterministic artifact
+        run: printf 'latchet verify demo v1\n' > artifact.txt

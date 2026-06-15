@@ -284,3 +284,53 @@ func SHA256Hex(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
+
+// Load reads and parses a provenance.json file. It checks the type URIs so a
+// non-provenance JSON file is rejected with a clear error rather than yielding
+// an empty statement.
+func Load(path string) (Statement, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return Statement{}, err
+	}
+	var st Statement
+	if err := json.Unmarshal(b, &st); err != nil {
+		return Statement{}, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	if st.PredicateType != PredicateType {
+		return Statement{}, fmt.Errorf("%s: not a SLSA provenance statement (predicateType=%q)", path, st.PredicateType)
+	}
+	return st, nil
+}
+
+// SubjectDigests maps each subject name to its sha256 digest.
+func (s Statement) SubjectDigests() map[string]string {
+	out := make(map[string]string, len(s.Subject))
+	for _, sub := range s.Subject {
+		out[sub.Name] = sub.Digest["sha256"]
+	}
+	return out
+}
+
+// ResolvedImages maps each image reference (as written in the workflow) to the
+// digest-pinned URI recorded in resolvedDependencies.
+func (s Statement) ResolvedImages() map[string]string {
+	deps := s.Predicate.BuildDefinition.ResolvedDependencies
+	out := make(map[string]string, len(deps))
+	for _, d := range deps {
+		if d.Name != "" {
+			out[d.Name] = d.URI
+		}
+	}
+	return out
+}
+
+// WorkflowDigest returns the recorded sha256 of the workflow file.
+func (s Statement) WorkflowDigest() string {
+	return s.Predicate.BuildDefinition.ExternalParameters.Workflow.Digest["sha256"]
+}
+
+// WorkflowPath returns the workflow file path recorded at run time.
+func (s Statement) WorkflowPath() string {
+	return s.Predicate.BuildDefinition.ExternalParameters.Workflow.Path
+}
