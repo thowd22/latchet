@@ -341,8 +341,39 @@ preferred). Override with `LATCHET_RUNTIME=podman`.
 | `LATCHET_COSIGN_KEY` | path to a cosign private key; when set (and `cosign` is on `PATH`), the run's `provenance.json` is signed (see [Provenance](#provenance-slsa)) |
 | `LATCHET_COSIGN_TLOG=1` | also upload the signature to a Rekor transparency log (off by default, so signing works offline) |
 | `LATCHET_DETERMINISTIC=1` | force the [determinism helpers](#reproducible-builds-determinism-helpers) on for every job |
+| `LATCHET_CONFIG` | explicit path to the [global config](#global-configuration) (overrides the default search) |
 
 A failed run always keeps its workspace and prints the path.
+
+## Global configuration
+
+An optional machine-wide config, `latchet-ci.yml`, sets user defaults — it is
+separate from the per-project workflow `latchet.yml`. With no file present,
+latchet behaves exactly as without it. It is loaded from the first of:
+
+1. `$LATCHET_CONFIG` (explicit path)
+2. `$XDG_CONFIG_HOME/latchet/latchet-ci.yml`
+3. `~/.config/latchet/latchet-ci.yml`
+
+```yaml
+runtime: podman                 # preferred container runtime
+workspace_root: /var/lib/latchet/ws
+log_dir: /var/log/latchet
+max_parallel: 4                 # default job concurrency
+env:                            # default env merged into every run
+  REGISTRY: ghcr.io/me
+watch:                          # repositories for `latchet watch` (forthcoming)
+  - url: git@github.com:me/app.git
+    branches: [main]
+    tags: ["v*"]
+```
+
+Precedence — **CLI flags > environment variables > global config > built-in
+defaults**. So `runtime`/`workspace_root`/`log_dir` fill the matching
+`LATCHET_*` env var only when it is unset, `max_parallel` applies unless
+`-max-parallel` was passed, and the `env:` map is merged **below** a workflow's
+own `env:` (a workflow always overrides a machine default). Unknown keys are
+rejected, as in `latchet.yml`.
 
 ## Limitations
 

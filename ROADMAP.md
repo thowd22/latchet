@@ -139,12 +139,13 @@ getting started; seeds below (signed OCI builds first):
     Homebrew formula/tap as a follow-up.
   - **Windows** — `install.ps1` for PowerShell.
   Depends on the release pipeline above for binaries to download.
-- **Global `latchet-ci.yml` config** — a machine-wide config file (separate
-  from the per-project workflow `latchet.yml`) for user defaults: preferred
-  container runtime, workspace root, default env, log verbosity. Loaded from a
-  standard location (`$XDG_CONFIG_HOME/latchet/latchet-ci.yml`, `~/.config/...`,
-  or `%APPDATA%` on Windows) and overridden by per-project settings and
-  environment variables.
+- ~~**Global `latchet-ci.yml` config**~~ — **shipped** (`internal/globalconfig`).
+  Machine-wide defaults (runtime, workspace root, log dir, `max_parallel`,
+  default `env`, and the `watch:` repo list) loaded from `$LATCHET_CONFIG`,
+  `$XDG_CONFIG_HOME/latchet/`, or `~/.config/latchet/`. Precedence: flags > env
+  vars > global config > defaults; default `env` merges below a workflow's own.
+  Strict parsing (unknown keys rejected). `%APPDATA%` on Windows is deferred.
+  See [`docs/watch-plan.md`](docs/watch-plan.md).
 - **`latchet watch` — git change monitoring** — a one-shot command that
   checks each watched repo configured in the global `latchet-ci.yml` for
   new commits on configured branches and tags; when any watched ref

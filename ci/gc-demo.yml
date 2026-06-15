@@ -1,0 +1,11 @@
+name: gc-demo
+# Exercises the global config: the workflow's own env overrides a global
+# default, and a global default not set here flows through to the step.
+env:
+  PREC: workflow-level     # overrides the global config's PREC
+jobs:
+  a:
+    container: alpine:3.19
+    steps:
+      - name: print env
+        run: echo "GLOBAL_DEFAULT=$GLOBAL_DEFAULT PREC=$PREC"

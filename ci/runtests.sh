@@ -136,6 +136,26 @@ ec "verify lax (missing subject) -> 1" 1 env LATCHET_LOG_DIR="$TMP/v5" "$LATCHET
 cp ci/verify-demo.yml "$TMP/wf-mod.yml"; printf '# tampered recipe\n' >> "$TMP/wf-mod.yml"
 ec "verify (workflow SHA mismatch) -> 1" 1 env LATCHET_LOG_DIR="$TMP/v6" "$LATCHET" verify --file "$TMP/wf-mod.yml" "$VPROV"
 
+echo "===== GLOBAL CONFIG ====="
+GCFG="$TMP/latchet-ci.yml"
+cat > "$GCFG" <<YML
+runtime: podman
+max_parallel: 1
+env:
+  GLOBAL_DEFAULT: from-config
+  PREC: config-level
+YML
+GCLOGS="$TMP/logs-gc"
+# runtime comes from config (LATCHET_RUNTIME unset); global env default injected;
+# the workflow's own PREC overrides the config default.
+env -u LATCHET_RUNTIME LATCHET_CONFIG="$GCFG" LATCHET_LOG_DIR="$GCLOGS" "$LATCHET" -file ci/gc-demo.yml >/dev/null 2>&1
+GA="$GCLOGS/latest/a.log"
+[ -f "$GA" ] && ok "runtime from config (ran without LATCHET_RUNTIME)" || bad "runtime from config (ran without LATCHET_RUNTIME)"
+has "global default env injected"       "$GA" "GLOBAL_DEFAULT=from-config"
+has "workflow env overrides config env" "$GA" "PREC=workflow-level"
+printf 'bogus_key: 1\n' > "$TMP/badcfg.yml"
+ec "bad global config -> exit 2" 2 env LATCHET_CONFIG="$TMP/badcfg.yml" "$LATCHET" -file ci/gc-demo.yml
+
 echo "===== DETERMINISM HELPERS ====="
 DLOGS="$TMP/logs-det"
 LATCHET_LOG_DIR="$DLOGS" "$LATCHET" -file ci/deterministic.yml >/dev/null 2>&1

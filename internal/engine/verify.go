@@ -37,6 +37,7 @@ type VerifyOptions struct {
 	Strict       bool   // require every subject to match bit-for-bit
 	Explain      bool   // print per-subject mismatch detail
 	MaxParallel  int
+	DefaultEnv   map[string]string // global-config default env, applied to the re-run
 	Stdout       io.Writer
 	Stderr       io.Writer
 }
@@ -155,6 +156,7 @@ func Verify(vo VerifyOptions) int {
 		fmt.Fprintf(warn, "latchet verify: %v\n", err)
 		return ExitConfig
 	}
+	wf.Env = overlayDefaultEnv(vo.DefaultEnv, wf.Env)
 
 	// Pin each job's image to the digest recorded at the original run.
 	pinned := st.ResolvedImages()

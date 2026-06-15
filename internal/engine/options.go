@@ -30,6 +30,27 @@ type Options struct {
 
 	// Stderr receives diagnostic messages. Defaults to os.Stderr.
 	Stderr io.Writer
+
+	// DefaultEnv holds machine-wide default env (from the global config),
+	// merged below the workflow's own env so a workflow always overrides it.
+	DefaultEnv map[string]string
+}
+
+// overlayDefaultEnv returns wf.Env with defaults merged underneath: a key set
+// by the workflow overrides the same key in defaults. Used to apply the global
+// config's default env at workflow-env precedence.
+func overlayDefaultEnv(defaults, wfEnv map[string]string) map[string]string {
+	if len(defaults) == 0 {
+		return wfEnv
+	}
+	merged := make(map[string]string, len(defaults)+len(wfEnv))
+	for k, v := range defaults {
+		merged[k] = v
+	}
+	for k, v := range wfEnv {
+		merged[k] = v
+	}
+	return merged
 }
 
 // resolve fills in defaults for fields the caller left zero, returning a

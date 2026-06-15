@@ -39,6 +39,7 @@ func Run(opts Options) int {
 	if err != nil {
 		return ExitConfig
 	}
+	wf.Env = overlayDefaultEnv(opts.DefaultEnv, wf.Env)
 
 	rt, err := runtime.Detect()
 	if err != nil {

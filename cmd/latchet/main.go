@@ -13,6 +13,7 @@ import (
 	"runtime"
 
 	"github.com/thowd22/latchet/internal/engine"
+	"github.com/thowd22/latchet/internal/globalconfig"
 	"github.com/thowd22/latchet/internal/version"
 )
 
@@ -25,9 +26,23 @@ func main() {
 // run is the testable entry point: it parses argv (without the program name),
 // dispatches to the right action, and returns a process exit code.
 func run(args []string, stdout, stderr io.Writer) int {
+	// Machine-wide defaults (optional). Loaded before anything else so its
+	// LATCHET_* defaults are in place when the runtime/workspace/log packages
+	// read them, and its watch list / default env are available to subcommands.
+	cfg, err := globalconfig.Load()
+	if err != nil {
+		fmt.Fprintf(stderr, "latchet: %v\n", err)
+		return engine.ExitConfig
+	}
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(stderr, "latchet: %v\n", err)
+		return engine.ExitConfig
+	}
+	cfg.ApplyEnvDefaults()
+
 	// Subcommands are bare words (no leading dash); flags start with "-".
 	if len(args) > 0 && args[0] == "verify" {
-		return runVerify(args[1:], stdout, stderr)
+		return runVerify(args[1:], cfg, stdout, stderr)
 	}
 
 	fs := flag.NewFlagSet("latchet", flag.ContinueOnError)
@@ -60,8 +75,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return engine.ExitSuccess
 	}
 
-	if *maxParallel < 1 {
-		fmt.Fprintf(stderr, "latchet: -max-parallel must be >= 1 (got %d)\n", *maxParallel)
+	// Global config sets the default job concurrency unless -max-parallel was
+	// passed explicitly (flags win over config).
+	parallel := *maxParallel
+	if cfg.MaxParallel > 0 && !flagSet(fs, "max-parallel") {
+		parallel = cfg.MaxParallel
+	}
+	if parallel < 1 {
+		fmt.Fprintf(stderr, "latchet: max-parallel must be >= 1 (got %d)\n", parallel)
 		return engine.ExitConfig
 	}
 
@@ -73,7 +94,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	opts := engine.Options{
 		File:        *file,
 		DryRun:      *dryRun,
-		MaxParallel: *maxParallel,
+		MaxParallel: parallel,
+		DefaultEnv:  cfg.Env,
 		Stdout:      stdout,
 		Stderr:      stderr,
 	}
@@ -108,8 +130,20 @@ Subcommands:
 With no flags, latchet reads ./latchet.yml from the current directory.`)
 }
 
+// flagSet reports whether the named flag was explicitly passed on the command
+// line (as opposed to left at its default).
+func flagSet(fs *flag.FlagSet, name string) bool {
+	found := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
+}
+
 // runVerify handles `latchet verify [flags] <provenance.json>`.
-func runVerify(args []string, stdout, stderr io.Writer) int {
+func runVerify(args []string, cfg *globalconfig.Config, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("latchet verify", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -139,6 +173,7 @@ func runVerify(args []string, stdout, stderr io.Writer) int {
 		Strict:       *strict,
 		Explain:      *explain,
 		MaxParallel:  *maxParallel,
+		DefaultEnv:   cfg.Env,
 		Stdout:       stdout,
 		Stderr:       stderr,
 	})
