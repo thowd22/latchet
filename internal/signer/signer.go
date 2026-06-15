@@ -41,6 +41,31 @@ func signBlobArgs(keyPath, blobPath, bundlePath string, tlog bool) []string {
 	return append(args, blobPath)
 }
 
+// verifyBlobArgs builds the cosign argv to verify a blob against a Sigstore
+// bundle with a public key. --insecure-ignore-tlog=true accepts signatures
+// made offline (no Rekor entry), matching SignBlob's default.
+func verifyBlobArgs(pubKeyPath, bundlePath, blobPath string) []string {
+	return []string{
+		"verify-blob",
+		"--key", pubKeyPath,
+		"--bundle", bundlePath,
+		"--insecure-ignore-tlog=true",
+		blobPath,
+	}
+}
+
+// VerifyBlob checks that bundlePath is a valid signature over blobPath made by
+// the key whose public half is at pubKeyPath. A non-nil error means the
+// signature did not verify (tampered blob, wrong key, or malformed bundle),
+// with cosign's output included.
+func VerifyBlob(ctx context.Context, pubKeyPath, bundlePath, blobPath string) error {
+	out, err := exec.CommandContext(ctx, binary, verifyBlobArgs(pubKeyPath, bundlePath, blobPath)...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("cosign verify-blob: %w\n%s", err, out)
+	}
+	return nil
+}
+
 // SignBlob signs blobPath with the cosign private key at keyPath, writing a
 // Sigstore bundle to "<blobPath>.bundle" and returning that path. The caller
 // is responsible for checking Available first; a cosign error (including a

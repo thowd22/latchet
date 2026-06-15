@@ -19,6 +19,20 @@ func TestSignBlobArgs(t *testing.T) {
 	}
 }
 
+func TestVerifyBlobArgs(t *testing.T) {
+	got := verifyBlobArgs("/k/cosign.pub", "/logs/provenance.json.bundle", "/logs/provenance.json")
+	want := []string{
+		"verify-blob",
+		"--key", "/k/cosign.pub",
+		"--bundle", "/logs/provenance.json.bundle",
+		"--insecure-ignore-tlog=true",
+		"/logs/provenance.json",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("verifyBlobArgs =\n  %v\nwant\n  %v", got, want)
+	}
+}
+
 func TestSignBlobArgsWithTlog(t *testing.T) {
 	got := signBlobArgs("k", "b", "b.bundle", true)
 	// With tlog on, latchet must not force the offline knobs — cosign uploads

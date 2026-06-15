@@ -62,3 +62,18 @@ func TestForIsOverridable(t *testing.T) {
 		}
 	}
 }
+
+func TestDeterministic(t *testing.T) {
+	got := Deterministic(Git{CommitEpoch: "1700000000"})
+	want := map[string]string{
+		"SOURCE_DATE_EPOCH": "1700000000",
+		"LC_ALL":            "C",
+		"LANG":              "C",
+		"TZ":                "UTC",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("Deterministic()[%s] = %q, want %q", k, got[k], v)
+		}
+	}
+}

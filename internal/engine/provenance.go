@@ -55,7 +55,7 @@ func emitProvenance(ctx context.Context, ws *workspace.Run, ls *logstore.Run, wf
 			}
 		}
 
-		builtins := builtinenv.For(ws.ID, id, "/workspace", git)
+		builtins := jobBuiltins(ws.ID, job, wf, git)
 		steps := make([]provenance.StepParams, 0, len(job.Steps))
 		for _, st := range job.Steps {
 			merged := mergeEnv(builtins, wf.Env, job.Env, st.Env)

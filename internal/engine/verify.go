@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/thowd22/latchet/internal/builtinenv"
 	"github.com/thowd22/latchet/internal/config"
@@ -18,13 +20,20 @@ import (
 	"github.com/thowd22/latchet/internal/provenance"
 	"github.com/thowd22/latchet/internal/runtime"
 	"github.com/thowd22/latchet/internal/scheduler"
+	"github.com/thowd22/latchet/internal/signer"
 	"github.com/thowd22/latchet/internal/workspace"
 )
+
+func fileExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
+}
 
 // VerifyOptions configures a `latchet verify` invocation.
 type VerifyOptions struct {
 	ManifestPath string // path to provenance.json
 	File         string // workflow override; default is the path recorded in the manifest
+	Key          string // cosign public key; when set, verify <manifest>.bundle first
 	Strict       bool   // require every subject to match bit-for-bit
 	Explain      bool   // print per-subject mismatch detail
 	MaxParallel  int
@@ -34,11 +43,12 @@ type VerifyOptions struct {
 
 // VerificationReport is written to <logdir>/verification.json.
 type VerificationReport struct {
-	Manifest string            `json:"manifest"`
-	Mode     string            `json:"mode"` // strict | lax
-	Result   string            `json:"result"`
-	Workflow workflowCheck     `json:"workflow"`
-	Subjects subjectComparison `json:"subjects"`
+	Manifest  string            `json:"manifest"`
+	Mode      string            `json:"mode"` // strict | lax
+	Result    string            `json:"result"`
+	Signature signatureCheck    `json:"signature"`
+	Workflow  workflowCheck     `json:"workflow"`
+	Subjects  subjectComparison `json:"subjects"`
 }
 
 type workflowCheck struct {
@@ -46,6 +56,12 @@ type workflowCheck struct {
 	ExpectedSHA string `json:"expectedSha256"`
 	ActualSHA   string `json:"actualSha256"`
 	Match       bool   `json:"match"`
+}
+
+type signatureCheck struct {
+	Checked bool   `json:"checked"`
+	Valid   bool   `json:"valid"`
+	Bundle  string `json:"bundle,omitempty"`
 }
 
 type subjectComparison struct {
@@ -81,6 +97,28 @@ func Verify(vo VerifyOptions) int {
 	if err != nil {
 		fmt.Fprintf(warn, "latchet verify: %v\n", err)
 		return ExitConfig
+	}
+
+	// Verify the manifest's own signature first, before trusting any value it
+	// records. Fails fast on a tampered/unsigned manifest, before the re-run.
+	sig := signatureCheck{}
+	if vo.Key != "" {
+		bundlePath := vo.ManifestPath + ".bundle"
+		sig.Bundle = bundlePath
+		switch {
+		case !signer.Available():
+			fmt.Fprintf(warn, "latchet verify: cosign not found; skipping signature check\n")
+		case !fileExists(bundlePath):
+			fmt.Fprintf(warn, "latchet verify: no signature bundle at %s; skipping signature check\n", bundlePath)
+		default:
+			sig.Checked = true
+			if err := signer.VerifyBlob(context.Background(), vo.Key, bundlePath, vo.ManifestPath); err != nil {
+				fmt.Fprintf(out, "latchet verify: FAILED — manifest signature did not verify\n  %v\n", err)
+				return ExitFailed
+			}
+			sig.Valid = true
+			fmt.Fprintf(out, "latchet verify: manifest signature OK (%s)\n", bundlePath)
+		}
 	}
 
 	wfPath := st.WorkflowPath()
@@ -158,8 +196,9 @@ func Verify(vo VerifyOptions) int {
 	if maxParallel < 1 {
 		maxParallel = 1
 	}
-	// The re-run's own git facts do not affect artifact hashes.
-	git := builtinenv.Git{}
+	// The re-run's own git facts do not affect artifact hashes; a fallback
+	// SOURCE_DATE_EPOCH is still provided in case the workflow is deterministic.
+	git := builtinenv.Git{CommitEpoch: strconv.FormatInt(time.Now().Unix(), 10)}
 
 	results, infraErr := scheduler.Run(context.Background(), g, scheduler.Options{
 		MaxParallel: maxParallel,
@@ -193,11 +232,12 @@ func Verify(vo VerifyOptions) int {
 	}
 
 	report := VerificationReport{
-		Manifest: vo.ManifestPath,
-		Mode:     modeName(vo.Strict),
-		Result:   resultName(verified),
-		Workflow: workflowCheck{Path: wfPath, ExpectedSHA: expectedSHA, ActualSHA: actualSHA, Match: true},
-		Subjects: cmp,
+		Manifest:  vo.ManifestPath,
+		Mode:      modeName(vo.Strict),
+		Result:    resultName(verified),
+		Signature: sig,
+		Workflow:  workflowCheck{Path: wfPath, ExpectedSHA: expectedSHA, ActualSHA: actualSHA, Match: true},
+		Subjects:  cmp,
 	}
 	reportPath, werr := writeReport(ls.Dir, report)
 	if werr != nil {
@@ -282,6 +322,9 @@ func writeReport(dir string, r VerificationReport) (string, error) {
 func printVerifySummary(out io.Writer, vo VerifyOptions, r VerificationReport, reportPath string, runFailed bool) {
 	c := r.Subjects
 	fmt.Fprintf(out, "\nlatchet verify (%s): %s\n", r.Mode, strings.ToUpper(r.Result))
+	if r.Signature.Checked {
+		fmt.Fprintf(out, "  signature: verified\n")
+	}
 	fmt.Fprintf(out, "  subjects: %d matched, %d mismatched, %d missing, %d extra\n",
 		len(c.Matched), len(c.Mismatched), len(c.Missing), len(c.Extra))
 	if runFailed {

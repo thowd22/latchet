@@ -1,0 +1,19 @@
+name: determinism-demo
+# One deterministic job and one plain job, each printing the determinism
+# helper vars, so the harness can confirm they are injected only when asked.
+jobs:
+  det:
+    container: alpine:3.19
+    deterministic: true
+    steps:
+      - name: print det vars
+        run: |
+          echo "DET SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          echo "DET TZ=$TZ LC_ALL=$LC_ALL LANG=$LANG"
+  plain:
+    container: alpine:3.19
+    steps:
+      - name: print plain vars
+        run: |
+          echo "PLAIN SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          echo "PLAIN TZ=$TZ LC_ALL=$LC_ALL LANG=$LANG"

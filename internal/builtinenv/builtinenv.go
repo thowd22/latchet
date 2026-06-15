@@ -41,6 +41,10 @@ type Git struct {
 	Tag    string // tag name when HEAD is exactly a tag
 	SHA    string // full commit SHA of HEAD
 	Ref    string // full ref, e.g. refs/heads/main or refs/tags/v1.0.0
+	// CommitEpoch is HEAD's commit time as a Unix-seconds string, used as
+	// SOURCE_DATE_EPOCH by the determinism helpers. Empty when unavailable;
+	// the engine fills a run-start fallback in that case.
+	CommitEpoch string
 }
 
 // ResolveGit gathers git facts from the host working directory by shelling out
@@ -51,13 +55,28 @@ type Git struct {
 // values; once watch lands, a trigger's known ref/SHA take precedence.
 func ResolveGit(ctx context.Context) Git {
 	g := Git{
-		URL:    runGit(ctx, "remote", "get-url", "origin"),
-		Branch: runGit(ctx, "symbolic-ref", "--short", "HEAD"),
-		Tag:    runGit(ctx, "describe", "--tags", "--exact-match"),
-		SHA:    runGit(ctx, "rev-parse", "HEAD"),
+		URL:         runGit(ctx, "remote", "get-url", "origin"),
+		Branch:      runGit(ctx, "symbolic-ref", "--short", "HEAD"),
+		Tag:         runGit(ctx, "describe", "--tags", "--exact-match"),
+		SHA:         runGit(ctx, "rev-parse", "HEAD"),
+		CommitEpoch: runGit(ctx, "show", "-s", "--format=%ct", "HEAD"),
 	}
 	g.Ref = DeriveRef(g.Branch, g.Tag)
 	return g
+}
+
+// Deterministic returns the environment the determinism helpers inject into a
+// job's steps to remove the cheapest sources of build nondeterminism. These
+// sit at built-in (lowest) precedence so a workflow can override any of them.
+// SOURCE_DATE_EPOCH is HEAD's commit time when known (stable across re-runs of
+// the same commit), else the engine-provided run-start fallback in g.CommitEpoch.
+func Deterministic(g Git) map[string]string {
+	return map[string]string{
+		"SOURCE_DATE_EPOCH": g.CommitEpoch,
+		"LC_ALL":            "C",
+		"LANG":              "C",
+		"TZ":                "UTC",
+	}
 }
 
 // DeriveRef builds the full ref string from a branch or tag name, preferring a

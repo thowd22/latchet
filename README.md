@@ -229,7 +229,13 @@ latchet verify provenance.json              # lax (default)
 latchet verify --strict provenance.json     # require bit-for-bit match
 latchet verify --explain provenance.json    # print per-subject mismatch detail
 latchet verify --file latchet.yml provenance.json   # override workflow path
+latchet verify --key cosign.pub provenance.json     # also verify the signature
 ```
+
+With `--key`, latchet first verifies the manifest's signature bundle
+(`provenance.json.bundle`, from [signing](#signing-the-attestation)) with the
+given cosign public key and fails fast if it doesn't check out — so a tampered
+or unsigned manifest is rejected before any re-run.
 
 It (1) checks the on-disk workflow's SHA256 matches the manifest — you can't
 reproduce a build from a different recipe; (2) re-runs the workflow in a fresh
@@ -251,6 +257,40 @@ manifest/workflow · `3` runtime error.
 > deterministic. `--explain` lists expected-vs-actual hashes; true byte-level
 > diffing of artifacts is out of scope (the manifest records hashes, not the
 > original bytes).
+
+### Reproducible builds (determinism helpers)
+
+To make more of a workflow's output reproducible (and so verifiable under
+`--strict`), opt into the determinism helpers — set `deterministic: true` at
+the workflow or job level, or `LATCHET_DETERMINISTIC=1`:
+
+```yaml
+name: release
+deterministic: true            # applies to every job
+jobs:
+  build:
+    container: golang:1.22
+    # deterministic: true      # or just this one job
+    steps:
+      - run: git clone --depth 1 "$LATCHET_GIT_URL" .
+      - run: go build -trimpath -o app ./...
+```
+
+When on, latchet injects these at built-in (lowest) precedence, so a workflow
+can still override any of them:
+
+| Variable | Value |
+|----------|-------|
+| `SOURCE_DATE_EPOCH` | HEAD's commit time (Unix seconds) — stable across re-runs of the same commit; falls back to run-start time when unavailable |
+| `LC_ALL`, `LANG` | `C` |
+| `TZ` | `UTC` |
+
+This is **best-effort triage, not a guarantee**: reproducibility ultimately
+lives in the toolchain and the workflow's discipline. Pair it with
+`SOURCE_DATE_EPOCH`-aware tools (Go `-trimpath`, recent npm, `cargo`, `gcc
+-ffile-prefix-map`) and deterministic archiving (`tar --sort=name
+--mtime=@$SOURCE_DATE_EPOCH`). Hermetic builds (Nix/Bazel-grade) are out of
+scope.
 
 ## Sharing files between jobs
 
@@ -278,6 +318,7 @@ preferred). Override with `LATCHET_RUNTIME=podman`.
 | `LATCHET_LOG_DIR` | base directory for log files (default per XDG / `~/.local/state/latchet`) |
 | `LATCHET_COSIGN_KEY` | path to a cosign private key; when set (and `cosign` is on `PATH`), the run's `provenance.json` is signed (see [Provenance](#provenance-slsa)) |
 | `LATCHET_COSIGN_TLOG=1` | also upload the signature to a Rekor transparency log (off by default, so signing works offline) |
+| `LATCHET_DETERMINISTIC=1` | force the [determinism helpers](#reproducible-builds-determinism-helpers) on for every job |
 
 A failed run always keeps its workspace and prints the path.
 

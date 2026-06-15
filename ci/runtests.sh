@@ -136,6 +136,33 @@ ec "verify lax (missing subject) -> 1" 1 env LATCHET_LOG_DIR="$TMP/v5" "$LATCHET
 cp ci/verify-demo.yml "$TMP/wf-mod.yml"; printf '# tampered recipe\n' >> "$TMP/wf-mod.yml"
 ec "verify (workflow SHA mismatch) -> 1" 1 env LATCHET_LOG_DIR="$TMP/v6" "$LATCHET" verify --file "$TMP/wf-mod.yml" "$VPROV"
 
+echo "===== DETERMINISM HELPERS ====="
+DLOGS="$TMP/logs-det"
+LATCHET_LOG_DIR="$DLOGS" "$LATCHET" -file ci/deterministic.yml >/dev/null 2>&1
+DL="$DLOGS/latest/det.log"; PL="$DLOGS/latest/plain.log"
+grep -qE 'DET SOURCE_DATE_EPOCH=[0-9]+' "$DL" && ok "deterministic: SOURCE_DATE_EPOCH set" || bad "deterministic: SOURCE_DATE_EPOCH set"
+has "deterministic: TZ/LC_ALL/LANG set" "$DL" "DET TZ=UTC LC_ALL=C LANG=C"
+has "plain job: helpers NOT injected"   "$PL" "PLAIN TZ= LC_ALL= LANG="
+FLOGS="$TMP/logs-detforce"
+LATCHET_DETERMINISTIC=1 LATCHET_LOG_DIR="$FLOGS" "$LATCHET" -file ci/deterministic.yml >/dev/null 2>&1
+has "LATCHET_DETERMINISTIC=1 forces plain job" "$FLOGS/latest/plain.log" "PLAIN TZ=UTC LC_ALL=C LANG=C"
+
+echo "===== VERIFY --key (manifest signature) ====="
+if command -v cosign >/dev/null 2>&1; then
+  KD="$TMP/vkeys"; mkdir -p "$KD"; ( cd "$KD" && COSIGN_PASSWORD="" cosign generate-key-pair >/dev/null 2>&1 )
+  SVLOGS="$TMP/logs-signedrun"
+  COSIGN_PASSWORD="" LATCHET_COSIGN_KEY="$KD/cosign.key" LATCHET_LOG_DIR="$SVLOGS" "$LATCHET" -file ci/verify-demo.yml >/dev/null 2>&1
+  SVPROV="$SVLOGS/latest/provenance.json"
+  [ -f "$SVPROV.bundle" ] && ok "verify --key: signed run produced bundle" || bad "verify --key: signed run produced bundle"
+  ec "verify --key (valid sig) -> 0" 0 env LATCHET_LOG_DIR="$TMP/sv1" "$LATCHET" verify --key "$KD/cosign.pub" --file ci/verify-demo.yml "$SVPROV"
+  has "verify reports signature verified" "$TMP/out" "signature: verified"
+  cp "$SVPROV" "$TMP/svtamper.json"; cp "$SVPROV.bundle" "$TMP/svtamper.json.bundle"; printf ' ' >> "$TMP/svtamper.json"
+  ec "verify --key (tampered manifest) -> 1" 1 env LATCHET_LOG_DIR="$TMP/sv2" "$LATCHET" verify --key "$KD/cosign.pub" --file ci/verify-demo.yml "$TMP/svtamper.json"
+  has "verify reports signature did not verify" "$TMP/out" "signature did not verify"
+else
+  echo "SKIP  cosign not installed (verify --key checks skipped)"
+fi
+
 echo "===== FEATURE RUN (tag checkout: GIT_TAG / GIT_REF) ====="
 git -C "$HOME/latchet-src" fetch -q --tags 2>/dev/null
 git -C "$HOME/latchet-src" -c advice.detachedHead=false checkout -q v0.4.0

@@ -117,6 +117,7 @@ func runVerify(args []string, stdout, stderr io.Writer) int {
 		strict      = fs.Bool("strict", false, "require every subject to match bit-for-bit")
 		explain     = fs.Bool("explain", false, "print per-subject mismatch detail")
 		file        = fs.String("file", "", "workflow file to re-run (default: path recorded in the manifest)")
+		key         = fs.String("key", "", "cosign public key; verify <manifest>.bundle before re-running")
 		maxParallel = fs.Int("max-parallel", runtime.NumCPU(), "maximum jobs to run concurrently")
 	)
 	fs.Usage = func() { printVerifyUsage(stderr) }
@@ -134,6 +135,7 @@ func runVerify(args []string, stdout, stderr io.Writer) int {
 	return engine.Verify(engine.VerifyOptions{
 		ManifestPath: rest[0],
 		File:         *file,
+		Key:          *key,
 		Strict:       *strict,
 		Explain:      *explain,
 		MaxParallel:  *maxParallel,
@@ -156,6 +158,7 @@ Flags:
   -strict          require every subject to match bit-for-bit
   -explain         print per-subject mismatch detail
   -file PATH       workflow to re-run (default: path recorded in the manifest)
+  -key PATH        cosign public key; verify PROVENANCE.bundle before re-running
   -max-parallel N  maximum jobs to run concurrently (default: NumCPU)
 
 Exit codes: 0 verified · 1 verification failed · 2 bad manifest/workflow ·

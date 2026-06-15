@@ -8,6 +8,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/thowd22/latchet/internal/builtinenv"
@@ -79,6 +81,12 @@ func Run(opts Options) int {
 	// Resolve source-control facts once per run (run-level, host CWD) and inject
 	// them into every job as LATCHET_GIT_* built-in env vars.
 	git := builtinenv.ResolveGit(context.Background())
+	// SOURCE_DATE_EPOCH (used by the determinism helpers) falls back to the
+	// run-start time when HEAD's commit time is unavailable. Fixed once per run
+	// so every job sees the same value.
+	if git.CommitEpoch == "" {
+		git.CommitEpoch = strconv.FormatInt(time.Now().Unix(), 10)
+	}
 
 	started := time.Now()
 	results, infraErr := scheduler.Run(context.Background(), g, scheduler.Options{
@@ -155,6 +163,26 @@ func runOne(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, ls *log
 	return res, err
 }
 
+// jobDeterministic reports whether the determinism helpers apply to this job:
+// set workflow-wide, on the job, or forced via LATCHET_DETERMINISTIC=1.
+func jobDeterministic(wf *config.Workflow, job *config.Job) bool {
+	return wf.Deterministic || job.Deterministic || os.Getenv("LATCHET_DETERMINISTIC") == "1"
+}
+
+// jobBuiltins builds the lowest-precedence env base for a job: the LATCHET_*
+// built-ins plus, when the job is deterministic, the determinism helpers
+// (SOURCE_DATE_EPOCH, LC_ALL, LANG, TZ). Used by both execution and provenance
+// so the recorded env matches what ran.
+func jobBuiltins(runID string, job *config.Job, wf *config.Workflow, git builtinenv.Git) map[string]string {
+	m := builtinenv.For(runID, job.ID, "/workspace", git)
+	if jobDeterministic(wf, job) {
+		for k, v := range builtinenv.Deterministic(git) {
+			m[k] = v
+		}
+	}
+	return m
+}
+
 // runJob executes one job inside a freshly created container. A non-nil error
 // signals an infrastructure failure that the scheduler should treat as
 // aborting; a step exiting non-zero is reported as a scheduler.Result with
@@ -165,7 +193,7 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 	// Built-in vars are identical for every step in the job and form the
 	// lowest-precedence base of the env merge, so user env can override them.
 	// "/workspace" is the fixed container-side mount point (see runtime).
-	builtins := builtinenv.For(ws.ID, job.ID, "/workspace", git)
+	builtins := jobBuiltins(ws.ID, job, wf, git)
 
 	jobDir, err := ws.JobDir(job.ID)
 	if err != nil {

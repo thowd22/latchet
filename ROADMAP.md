@@ -209,6 +209,12 @@ for effect-only jobs (deploy, notify) that produce no file outputs.
 
 ### Subsystem 2 — Determinism helpers (small; raises the ceiling of what's verifiable)
 
+> **Shipped** (`internal/builtinenv.Deterministic`, wired in `engine`).
+> `deterministic: true` (workflow or job) / `LATCHET_DETERMINISTIC=1` injects
+> `SOURCE_DATE_EPOCH` (HEAD commit time, else run-start fallback), `LC_ALL=C`,
+> `LANG=C`, `TZ=UTC` at built-in (overridable) precedence. The archive-flag
+> and toolchain guidance below ship as README documentation, not enforcement.
+
 Optional knobs that remove the cheapest sources of nondeterminism so a
 larger fraction of any workflow's output is reproducible (and therefore
 verifiable). Activated by `deterministic: true` per-job or workflow-level,
@@ -269,9 +275,10 @@ attestation unsigned"). No hard install requirement.
 > subjects, and compares — writing `<logdir>/verification.json`. Modes:
 > `--lax` (default; passes when every subject is reproduced by name) and
 > `--strict` (bit-for-bit). `--explain` prints expected-vs-actual hashes.
-> **Still open:** byte-level `diffoscope` diffing (needs the original artifact
-> bytes, which the manifest doesn't carry — only hashes); verifying a *signed*
-> bundle's signature as part of verify; `source`-based checkout when the
+> `--key <pub>` verifies the manifest's cosign signature bundle before
+> re-running (fails fast on a tampered/unsigned manifest). **Still open:**
+> byte-level `diffoscope` diffing (needs the original artifact bytes, which
+> the manifest doesn't carry — only hashes); `source`-based checkout when the
 > workflow itself doesn't clone.
 
 The standout differentiator from any other minimal CI tool: any user
@@ -385,10 +392,18 @@ Done so far (cont.):
    key-based local path) — shipped (`internal/signer`); signs
    `provenance.json` via cosign when `LATCHET_COSIGN_KEY` is set. The
    keyless release-pipeline path remains open (see Subsystem 3 note).
-7. ~~**Supply chain & attestation, Subsystem 4**~~ (verify, core) — shipped
+7. ~~**Supply chain & attestation, Subsystem 4**~~ (verify) — shipped
    (`engine.Verify`, `latchet verify`); re-derives a run from its
-   provenance and compares subjects (strict/lax). diffoscope/--explain
-   byte-diffing and signed-bundle verification remain open.
+   provenance and compares subjects (strict/lax), and `--key` verifies the
+   manifest's signature bundle. diffoscope byte-diffing remains open.
+8. ~~**Supply chain & attestation, Subsystem 2**~~ (determinism helpers) —
+   shipped; `deterministic:` / `LATCHET_DETERMINISTIC=1` inject
+   `SOURCE_DATE_EPOCH` + `LC_ALL`/`LANG`/`TZ`.
+
+The supply-chain follow-ups that remain are gated on other roadmap items:
+keyless Fulcio/OIDC signing and `cosign attest`/OCI signing both need the
+**Release pipeline** (GitHub Actions) item; `diffoscope` byte-diffing needs
+artifact bytes the manifest doesn't carry.
 
 Next picks (in rough order of value-per-effort):
 1. **Global `latchet-ci.yml` + `latchet watch`** — turns latchet into a

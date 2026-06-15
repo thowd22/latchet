@@ -21,16 +21,21 @@ type Workflow struct {
 	Name string            `yaml:"name"`
 	Env  map[string]string `yaml:"env"`
 	Jobs map[string]*Job   `yaml:"jobs"`
+	// Deterministic, when true, applies the determinism helpers to every job
+	// (inject SOURCE_DATE_EPOCH, LC_ALL=C, LANG=C, TZ=UTC). A job may also set
+	// it individually; LATCHET_DETERMINISTIC=1 forces it on globally.
+	Deterministic bool `yaml:"deterministic"`
 }
 
 // Job is one unit of work, executed inside a single container.
 type Job struct {
-	ID        string            `yaml:"-"` // filled from the jobs map key
-	Container string            `yaml:"container"`
-	Env       map[string]string `yaml:"env"`
-	Needs     StringOrSlice     `yaml:"needs"`
-	Inherit   string            `yaml:"inherit"` // name a single parent whose /workspace is copied in before this job runs; must also appear in needs
-	Steps     []*Step           `yaml:"steps"`
+	ID            string            `yaml:"-"` // filled from the jobs map key
+	Container     string            `yaml:"container"`
+	Env           map[string]string `yaml:"env"`
+	Needs         StringOrSlice     `yaml:"needs"`
+	Inherit       string            `yaml:"inherit"` // name a single parent whose /workspace is copied in before this job runs; must also appear in needs
+	Steps         []*Step           `yaml:"steps"`
+	Deterministic bool              `yaml:"deterministic"` // apply determinism helpers to this job
 }
 
 // Step is one shell command run inside its job's container.
