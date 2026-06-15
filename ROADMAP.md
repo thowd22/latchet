@@ -97,11 +97,13 @@ pass before implementation.
 - **Workspace retention sweeper** — auto-clean old run directories from temp.
 - **CLI flags** — `validate-only`, `dry-run`, and a real argument parser (v1
   takes no args).
-- **Release pipeline** — tagged releases with published prebuilt binaries.
-  A CI workflow that, on a version tag, cross-compiles `latchet` for
-  linux/macOS/Windows × amd64/arm64 and uploads the binaries (plus checksums)
-  as release assets. **Prerequisite for the installation scripts below** —
-  the installers have nothing to download until this exists.
+- ~~**Release pipeline**~~ — **shipped** (`.github/workflows/release.yml`). On
+  a version tag it cross-compiles `latchet` for linux/macOS/Windows ×
+  amd64/arm64, generates `SHA256SUMS`, **keyless-signs** the checksums with
+  cosign via GitHub OIDC (Fulcio cert + Rekor bundle, no key on disk), and
+  publishes everything as release assets — so releases are SLSA L2 and the
+  installation scripts have something to download. `workflow_dispatch` runs
+  build+sign without cutting a release, for validation.
 - **Automated installation scripts** — one-line installers that fetch the
   right prebuilt binary and put it on `PATH`:
   - **Linux** — `install.sh` (curl-pipe friendly); detect arch (amd64/arm64).
@@ -242,9 +244,12 @@ guarantees (Nix-grade) are out of scope and always will be.
 > (`--tlog-upload=false` by default; `LATCHET_COSIGN_TLOG=1` opts into Rekor),
 > writing `provenance.json.sig`. Soft dependency: missing cosign or no key
 > leaves the attestation unsigned; best-effort, never changes the exit code.
-> **Still open:** the keyless Fulcio/OIDC release path below (no key on disk),
-> which lands with the **Release pipeline** item; and `cosign attest`/OCI
-> signing once the release pipeline pushes images.
+> **Keyless Fulcio/OIDC signing — shipped** in the release pipeline
+> (`.github/workflows/release.yml`): on a tag, GitHub's OIDC mints a Fulcio
+> cert (no key on disk) and `cosign sign-blob` signs `SHA256SUMS` into a Rekor
+> bundle shipped as a release asset → SLSA L2 for releases. **Still open:**
+> `cosign attest`/OCI signing, once the release pipeline pushes container
+> images.
 
 After provenance emission, optionally sign the attestation and publish
 to a transparency log:
@@ -400,10 +405,16 @@ Done so far (cont.):
    shipped; `deterministic:` / `LATCHET_DETERMINISTIC=1` inject
    `SOURCE_DATE_EPOCH` + `LC_ALL`/`LANG`/`TZ`.
 
-The supply-chain follow-ups that remain are gated on other roadmap items:
-keyless Fulcio/OIDC signing and `cosign attest`/OCI signing both need the
-**Release pipeline** (GitHub Actions) item; `diffoscope` byte-diffing needs
-artifact bytes the manifest doesn't carry.
+9. ~~**Release pipeline + keyless signing**~~ — shipped
+   (`.github/workflows/release.yml`); tagged cross-compiled releases with
+   cosign keyless-signed `SHA256SUMS` (Fulcio + Rekor) → SLSA L2 for releases.
+
+The supply-chain arc (Subsystems 1–4 + keyless release signing) is now
+complete. The only remaining pieces are genuinely out of scope or dependent on
+features that don't exist yet: `cosign attest`/OCI signing needs the engine to
+push container images (it doesn't); `diffoscope` byte-diffing in `verify
+--explain` needs the original artifact bytes, which the manifest deliberately
+records only as hashes.
 
 Next picks (in rough order of value-per-effort):
 1. **Global `latchet-ci.yml` + `latchet watch`** — turns latchet into a

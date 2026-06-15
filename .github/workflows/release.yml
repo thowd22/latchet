@@ -9,7 +9,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write   # create the release
+  id-token: write   # keyless cosign signing via GitHub OIDC
 
 jobs:
   release:
@@ -56,6 +57,22 @@ jobs:
           done
           (cd dist && sha256sum * > SHA256SUMS)
           ls -la dist
+
+      - name: install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: sign checksums (keyless)
+        # Keyless signing: GitHub's OIDC token mints a short-lived Fulcio
+        # certificate (no key material on disk) and the signature is recorded
+        # in the Rekor transparency log. The bundle covers every artifact
+        # transitively via SHA256SUMS. Runs on dispatch too, so the keyless
+        # path can be validated without cutting a release.
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --bundle dist/SHA256SUMS.bundle \
+            dist/SHA256SUMS
+          echo "signed dist/SHA256SUMS -> dist/SHA256SUMS.bundle"
 
       - name: upload workflow artifacts
         # Always upload so a workflow_dispatch run leaves something to download.

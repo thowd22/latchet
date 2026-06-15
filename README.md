@@ -23,6 +23,28 @@ Pick a custom install dir with `LATCHET_INSTALL_DIR` / `$env:LATCHET_INSTALL_DIR
 
 Or build from source: `go build -o latchet ./cmd/latchet`.
 
+### Verifying a release
+
+Release artifacts are **keyless-signed** by the release pipeline: GitHub's OIDC
+identity mints a short-lived [Fulcio](https://docs.sigstore.dev/) certificate
+(no key material on disk) and the signature is recorded in the
+[Rekor](https://docs.sigstore.dev/logging/overview/) transparency log. Each
+release ships a `SHA256SUMS` plus a `SHA256SUMS.bundle`. Verify the checksums
+file's signature, then check your download against it:
+
+```sh
+cosign verify-blob \
+  --bundle SHA256SUMS.bundle \
+  --certificate-identity-regexp '^https://github\.com/thowd22/latchet/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS    # verify your downloaded artifact
+```
+
+A passing `cosign verify-blob` proves the checksums were produced by this
+repository's release workflow (SLSA Build L2 — a hosted builder with signed
+provenance). Requires **cosign v3+**.
+
 ## Usage
 
 With no flags, `latchet` reads `./latchet.yml` and runs every job:
