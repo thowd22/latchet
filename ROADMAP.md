@@ -62,10 +62,10 @@ getting started; seeds below (signed OCI builds first):
   parts of a pipeline: review a diff, summarize a PR/MR (pairs with **Discover
   open PRs / MRs** above), draft release notes / changelogs, triage test
   failures, or generate docs. Shared design: input read from `/workspace` (the
-  diff, files), output written back to `/workspace`; the API key comes from an
-  env var and is never handled by latchet core. ⚠️ Until secret masking lands,
-  env values are recorded in `provenance.json` (see
-  [README](README.md#provenance-slsa)). Unlike the CLI-adapter action above, a
+  diff, files), output written back to `/workspace`; the API key is provided
+  via a `secrets:` entry (now shipped), so it's injected into the step and
+  masked in logs and `provenance.json` rather than leaking. Unlike the
+  CLI-adapter action above, a
   prebuilt action runs as its **own container image**, so it may bundle a
   provider SDK internally without touching latchet's one-dependency rule. Three
   flavors:
@@ -168,21 +168,18 @@ getting started; seeds below (signed OCI builds first):
     per run, the run page can surface the attestation. Bigger questions
     (triggering runs from the UI, multi-host aggregation, websockets for
     live logs) are explicit non-goals for the minimal version.
-- **Secret masking** *(near-term priority)* — keep secret values out of
-  everything latchet writes. Now load-bearing: registry / cosign credentials,
-  and every **AI build step** (which takes an `ANTHROPIC_API_KEY` /
-  `OPENAI_API_KEY` via env), would otherwise leak in plaintext. Scope:
-  - **Declare secrets** — a way to mark which env values are secret (e.g. a
-    `secrets:` list of env keys at workflow/job level), since latchet has no
-    secret concept today and treats all env as plain text.
-  - **Mask in logs** — scan streamed step output and per-job log files,
-    replacing any occurrence of a secret value with `***`.
-  - **Redact in provenance** — wire the existing no-op `provenance.Redact`
-    seam (shipped with [Subsystem 1](#subsystem-1--provenance-emission-small-gets-every-run-to-slsa-l1))
-    to drop secret values from `internalParameters`, closing the documented
-    plaintext-env caveat in `provenance.json`.
-  - Open design: redacting a secret that appears only as a *substring* of
-    other output; secrets sourced from a file / external store vs. inline env.
+- ~~**Secret masking**~~ — **shipped** (`internal/mask`, `secrets:` schema).
+  A `secrets:` list of host env var names (workflow/job level) injects those
+  values into a job's steps and masks them everywhere latchet writes:
+  - **Mask in logs** — a streaming redactor (`internal/mask`) replaces secret
+    values with `***` in step output and per-job log files, holding back a
+    tail so a secret split across output chunks is still caught.
+  - **Redact in provenance** — `provenance.Redact`/`RedactString` (no longer a
+    no-op) drop secret values from `internalParameters` and per-step run
+    strings, closing the former plaintext-env caveat in `provenance.json`.
+  - **Still open:** secrets sourced from a file / external store (only host env
+    today); a secret whose value is a short common substring over-masks (noted
+    in the README).
 - **Workspace retention sweeper** — auto-clean old run directories from temp.
 - ~~**CLI flags**~~ — **shipped** (v0.2.0). `-file`, `-validate-only`,
   `-dry-run`, `-max-parallel`, `-version`, `-help`/`-h`, and a real argument
@@ -261,10 +258,10 @@ plug into a verifier model without bolting on a separate trust plane.
 > run writes `<logdir>/provenance.json`: an in-toto statement with a SLSA
 > v1.0 predicate (subjects hashed from job workspaces, images digest-pinned
 > via `runtime.ImageDigest`, workflow SHA, git source, builder + timestamps).
-> Best-effort; never changes exit code. Open follow-ups below remain:
-> secret-value redaction (a no-op `provenance.Redact` seam exists, awaiting
-> the secret-masking item) and an `artifacts:` selector to scope large
-> workspaces. See [`docs/provenance-plan.md`](docs/provenance-plan.md).
+> Best-effort; never changes exit code. Secret-value redaction is now wired
+> (`provenance.Redact`, via the shipped **secret masking** item). Open
+> follow-up: an `artifacts:` selector to scope large workspaces. See
+> [`docs/provenance-plan.md`](docs/provenance-plan.md).
 
 After each run, write `<logdir>/provenance.json` per SLSA v1.0 schema
 inside an [in-toto attestation](https://github.com/in-toto/attestation)
@@ -504,6 +501,8 @@ Done so far (cont.):
 11. ~~**Global `latchet-ci.yml` config**~~ — shipped (`internal/globalconfig`);
     machine-wide defaults + the `watch:` repo list, with flags > env > config
     precedence. Unblocks `latchet watch`.
+12. ~~**Secret masking**~~ — shipped (`internal/mask`, `secrets:` schema);
+    host-env secrets injected into steps and masked in logs + `provenance.json`.
 
 The supply-chain arc (Subsystems 1–4 + keyless release signing) is now
 complete. The only remaining pieces are genuinely out of scope or dependent on
@@ -514,18 +513,14 @@ image build** prebuilt action; `diffoscope` byte-diffing in `verify
 records only as hashes.
 
 Next picks (in rough order of value-per-effort):
-1. **Secret masking** — *critical*, and small. Closes the plaintext-env gap in
-   logs and `provenance.json` (the `provenance.Redact` seam is already in
-   place), and is a prerequisite for any step that takes a credential —
-   registry/cosign auth and every AI build step. Do this before shipping
-   credential-consuming actions.
-2. **`latchet watch`** — git change monitoring built on the now-shipped global
+1. **`latchet watch`** — git change monitoring built on the now-shipped global
    config (the `watch:` repo list). One-shot, cron-scheduled, SSH-based;
    turns latchet into a minimal CI server. Design in
    [`docs/watch-plan.md`](docs/watch-plan.md).
-3. **`uses` / reusable actions** (and the **Prebuilt actions / build steps**
-   catalog, incl. signed OCI builds) — still the largest single item; do it
-   once the engine is stable and the supply-chain story is in place (so
-   fetched actions can be verified).
+2. **`uses` / reusable actions** (and the **Prebuilt actions / build steps**
+   catalog, incl. signed OCI builds — credential-taking actions are now
+   unblocked by secret masking) — still the largest single item; do it once
+   the engine is stable and the supply-chain story is in place (so fetched
+   actions can be verified).
 
 Everything else can follow demand.

@@ -56,13 +56,17 @@ func emitProvenance(ctx context.Context, ws *workspace.Run, ls *logstore.Run, wf
 		}
 
 		builtins := jobBuiltins(ws.ID, job, wf, git)
+		secretEnv := resolveSecrets(wf, job)
+		secrets := secretValues(secretEnv)
 		steps := make([]provenance.StepParams, 0, len(job.Steps))
 		for _, st := range job.Steps {
-			merged := mergeEnv(builtins, wf.Env, job.Env, st.Env)
+			// Mirror the runtime env merge (incl. injected secrets), then redact
+			// any value (or run string) carrying a secret before recording.
+			merged := mergeEnv(builtins, wf.Env, job.Env, secretEnv, st.Env)
 			steps = append(steps, provenance.StepParams{
 				Name: st.Name,
-				Run:  st.Run,
-				Env:  provenance.Redact(merged),
+				Run:  provenance.RedactString(st.Run, secrets),
+				Env:  provenance.Redact(merged, secrets),
 			})
 		}
 		jobs = append(jobs, provenance.JobParams{ID: id, Image: job.Container, Steps: steps})

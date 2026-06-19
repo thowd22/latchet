@@ -207,10 +207,9 @@ Emission is best-effort and never changes a run's exit code. It is written
 for failed runs too (a faithful record), but not when a run aborts on an
 infrastructure error.
 
-> ⚠️ **Secret values are not yet redacted.** Until secret masking lands,
-> `internalParameters` records merged env *values* in plaintext. Treat the
-> log directory accordingly; don't publish `provenance.json` from a run whose
-> env carried secrets.
+Values of declared [secrets](#secrets) are redacted from `internalParameters`
+(recorded as `***`). Note that any env value written *inline* in the workflow's
+`env:` is recorded as-is — put credentials in `secrets:`, not `env:`.
 
 ### Signing the attestation
 
@@ -313,6 +312,38 @@ lives in the toolchain and the workflow's discipline. Pair it with
 -ffile-prefix-map`) and deterministic archiving (`tar --sort=name
 --mtime=@$SOURCE_DATE_EPOCH`). Hermetic builds (Nix/Bazel-grade) are out of
 scope.
+
+## Secrets
+
+Declare credentials with `secrets:` — a list of **host environment variable
+names** (workflow- and/or job-level). For each name that is set in latchet's
+own environment, the value is injected into that job's steps *and* masked
+everywhere latchet writes it:
+
+```yaml
+name: deploy
+secrets: [REGISTRY_TOKEN]      # applies to every job
+jobs:
+  publish:
+    container: alpine:3.19
+    secrets: [EXTRA_TOKEN]     # job-local; unioned with the workflow list
+    steps:
+      - run: echo "logging in with $REGISTRY_TOKEN"   # prints: logging in with ***
+```
+
+- **Source from the host, not the YAML.** A secret's value comes from
+  `$REGISTRY_TOKEN` in latchet's environment — never write the value in the
+  file. (Anything placed directly in `env:` is *not* a secret and is logged and
+  recorded as-is.)
+- **Masked in logs.** Any occurrence of a secret value in step output (and the
+  per-job log file) is replaced with `***`, even when split across output
+  chunks.
+- **Redacted in provenance.** Secret values are recorded as `***` in
+  `provenance.json` (see [Provenance](#provenance-slsa)).
+- A declared name that is unset in the host environment is simply skipped.
+
+> Masking is substring-based, so avoid declaring a secret whose value is a
+> short common string — it would mask unrelated output.
 
 ## Sharing files between jobs
 

@@ -19,6 +19,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -265,18 +266,30 @@ func hashFile(p string) (string, int64, error) {
 	return hex.EncodeToString(h.Sum(nil)), n, nil
 }
 
-// Redact returns a copy of env suitable for recording in provenance. It is the
-// identity function today; when the secret-masking roadmap item lands, secret
-// values will be replaced here so they never reach the attestation.
-func Redact(env map[string]string) map[string]string {
+// Redact returns a copy of env with every value that contains a secret value
+// replaced entirely by "***", so declared secrets never reach the attestation.
+// Empty secrets are ignored.
+func Redact(env map[string]string, secrets []string) map[string]string {
 	if env == nil {
 		return nil
 	}
 	out := make(map[string]string, len(env))
 	for k, v := range env {
-		out[k] = v
+		out[k] = RedactString(v, secrets)
 	}
 	return out
+}
+
+// RedactString replaces the whole string with "***" if it contains any secret
+// value, and otherwise returns it unchanged. Used for env values and per-step
+// run strings recorded in provenance.
+func RedactString(s string, secrets []string) string {
+	for _, sec := range secrets {
+		if sec != "" && strings.Contains(s, sec) {
+			return "***"
+		}
+	}
+	return s
 }
 
 // SHA256Hex returns the hex sha256 of b, for hashing the workflow file.

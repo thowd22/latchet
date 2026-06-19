@@ -156,6 +156,20 @@ has "workflow env overrides config env" "$GA" "PREC=workflow-level"
 printf 'bogus_key: 1\n' > "$TMP/badcfg.yml"
 ec "bad global config -> exit 2" 2 env LATCHET_CONFIG="$TMP/badcfg.yml" "$LATCHET" -file ci/gc-demo.yml
 
+echo "===== SECRET MASKING ====="
+SECRET="s3cr3t-$(echo abcXYZ | tr a-z A-Z)0123456789"   # fixed, distinctive value
+SLEN=${#SECRET}
+SECLOGS="$TMP/logs-secret"
+MY_SECRET="$SECRET" LATCHET_LOG_DIR="$SECLOGS" "$LATCHET" -file ci/secret-demo.yml >/dev/null 2>&1
+SL="$SECLOGS/latest/s.log"
+has "secret injected into step (PRESENT)"        "$SL" "PRESENT"
+has "container saw real value (LEN correct)"     "$SL" "LEN=$SLEN"
+has "secret value masked in log (VALUE=***)"     "$SL" "VALUE=***"
+grep -qF "$SECRET" "$SL" && bad "raw secret absent from log" || ok "raw secret absent from log"
+SPROVF="$SECLOGS/latest/provenance.json"
+grep -qF "$SECRET" "$SPROVF" && bad "raw secret absent from provenance" || ok "raw secret absent from provenance"
+grep -qF '"MY_SECRET": "***"' "$SPROVF" && ok "secret redacted in provenance (***)" || bad "secret redacted in provenance (***)"
+
 echo "===== DETERMINISM HELPERS ====="
 DLOGS="$TMP/logs-det"
 LATCHET_LOG_DIR="$DLOGS" "$LATCHET" -file ci/deterministic.yml >/dev/null 2>&1

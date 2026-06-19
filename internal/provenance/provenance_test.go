@@ -169,6 +169,23 @@ func TestLoadRejectsNonProvenance(t *testing.T) {
 	}
 }
 
+func TestRedact(t *testing.T) {
+	env := map[string]string{"API_KEY": "sk-supersecret", "PUBLIC": "hello", "EMBED": "x sk-supersecret y"}
+	got := Redact(env, []string{"sk-supersecret", ""})
+	if got["API_KEY"] != "***" || got["EMBED"] != "***" {
+		t.Errorf("secret values not redacted: %v", got)
+	}
+	if got["PUBLIC"] != "hello" {
+		t.Errorf("non-secret value altered: %v", got)
+	}
+	if RedactString("echo sk-supersecret", []string{"sk-supersecret"}) != "***" {
+		t.Error("RedactString did not redact a run string containing a secret")
+	}
+	if RedactString("echo hi", []string{"sk-supersecret"}) != "echo hi" {
+		t.Error("RedactString altered a clean string")
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

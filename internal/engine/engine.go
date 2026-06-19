@@ -18,6 +18,7 @@ import (
 	"github.com/thowd22/latchet/internal/envutil"
 	"github.com/thowd22/latchet/internal/log"
 	"github.com/thowd22/latchet/internal/logstore"
+	"github.com/thowd22/latchet/internal/mask"
 	"github.com/thowd22/latchet/internal/runtime"
 	"github.com/thowd22/latchet/internal/scheduler"
 	"github.com/thowd22/latchet/internal/workspace"
@@ -150,7 +151,12 @@ func runOne(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, ls *log
 		fmt.Fprintf(stdout, "\n== job: %s started (log: %s) ==\n", jobID, logPath)
 	}
 
-	res, err := runJob(ctx, rt, ws, wf, wf.Jobs[jobID], images, stepW, git)
+	// Mask declared secret values in everything this job writes (log file and,
+	// in serial mode, stdout). Passthrough when the job declares no secrets.
+	mw := mask.New(stepW, secretValues(resolveSecrets(wf, wf.Jobs[jobID])))
+
+	res, err := runJob(ctx, rt, ws, wf, wf.Jobs[jobID], images, mw, git)
+	mw.Close() // flush any masked tail held back across writes
 	if maxParallel > 1 {
 		switch {
 		case err != nil:
@@ -184,6 +190,35 @@ func jobBuiltins(runID string, job *config.Job, wf *config.Workflow, git builtin
 	return m
 }
 
+// resolveSecrets reads the host environment for every secret name declared on
+// the workflow or this job, returning name->value for those that are set and
+// non-empty. These are injected into the job's steps and masked in output.
+func resolveSecrets(wf *config.Workflow, job *config.Job) map[string]string {
+	names := make(map[string]bool, len(wf.Secrets)+len(job.Secrets))
+	for _, n := range wf.Secrets {
+		names[n] = true
+	}
+	for _, n := range job.Secrets {
+		names[n] = true
+	}
+	out := map[string]string{}
+	for n := range names {
+		if v := os.Getenv(n); v != "" {
+			out[n] = v
+		}
+	}
+	return out
+}
+
+// secretValues returns just the values of a resolved-secrets map.
+func secretValues(m map[string]string) []string {
+	vals := make([]string, 0, len(m))
+	for _, v := range m {
+		vals = append(vals, v)
+	}
+	return vals
+}
+
 // runJob executes one job inside a freshly created container. A non-nil error
 // signals an infrastructure failure that the scheduler should treat as
 // aborting; a step exiting non-zero is reported as a scheduler.Result with
@@ -195,6 +230,10 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 	// lowest-precedence base of the env merge, so user env can override them.
 	// "/workspace" is the fixed container-side mount point (see runtime).
 	builtins := jobBuiltins(ws.ID, job, wf, git)
+
+	// Declared secrets are pulled from the host env and injected just below
+	// step env. Their values are masked in this job's output by runOne.
+	secretEnv := resolveSecrets(wf, job)
 
 	jobDir, err := ws.JobDir(job.ID)
 	if err != nil {
@@ -224,7 +263,7 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 		}
 		log.StepStart(out, name)
 
-		env := envutil.Merge(builtins, wf.Env, job.Env, step.Env)
+		env := envutil.Merge(builtins, wf.Env, job.Env, secretEnv, step.Env)
 		start := time.Now()
 		code, err := rt.Exec(ctx, container, env, step.Run, out, out)
 		if err != nil {

@@ -25,6 +25,10 @@ type Workflow struct {
 	// (inject SOURCE_DATE_EPOCH, LC_ALL=C, LANG=C, TZ=UTC). A job may also set
 	// it individually; LATCHET_DETERMINISTIC=1 forces it on globally.
 	Deterministic bool `yaml:"deterministic"`
+	// Secrets names host environment variables whose values are injected into
+	// every job's steps and masked in logs and provenance. A job may declare
+	// its own; the two lists are unioned per job.
+	Secrets []string `yaml:"secrets"`
 }
 
 // Job is one unit of work, executed inside a single container.
@@ -36,6 +40,7 @@ type Job struct {
 	Inherit       string            `yaml:"inherit"` // name a single parent whose /workspace is copied in before this job runs; must also appear in needs
 	Steps         []*Step           `yaml:"steps"`
 	Deterministic bool              `yaml:"deterministic"` // apply determinism helpers to this job
+	Secrets       []string          `yaml:"secrets"`       // host env var names injected + masked for this job
 }
 
 // Step is one shell command run inside its job's container.
