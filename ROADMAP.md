@@ -40,10 +40,9 @@ getting started; seeds below (signed OCI builds first):
   [shared cache mount](#workflow-features) item.
 - _(more to come — SBOM generation (`syft`), artifact upload/download, etc.)_
 
-- **Parallel job execution** — run jobs whose `needs` are all satisfied
-  concurrently instead of sequentially. The DAG already exposes the graph, so
-  this is additive; the main work is per-job log prefixing/buffering so streams
-  don't interleave. *Lowest-effort high-value item — natural first pick.*
+- ~~**Parallel job execution**~~ — **shipped** (v0.2.0). Jobs whose `needs` are
+  all satisfied run concurrently (cap with `-max-parallel`); per-job log files
+  keep concurrent output from interleaving.
 - **Named artifacts (`upload-artifact` / `download-artifact`-style)** — pass
   selected files between arbitrary jobs by name. v3 added single-parent
   workspace inheritance (`inherit: <jobid>`) covering the common
@@ -123,8 +122,9 @@ getting started; seeds below (signed OCI builds first):
     live logs) are explicit non-goals for the minimal version.
 - **Secret masking** — redact secret values from streamed logs.
 - **Workspace retention sweeper** — auto-clean old run directories from temp.
-- **CLI flags** — `validate-only`, `dry-run`, and a real argument parser (v1
-  takes no args).
+- ~~**CLI flags**~~ — **shipped** (v0.2.0). `-file`, `-validate-only`,
+  `-dry-run`, `-max-parallel`, `-version`, `-help`/`-h`, and a real argument
+  parser (`cmd/latchet/main.go`).
 - ~~**Release pipeline**~~ — **shipped** (`.github/workflows/release.yml`). On
   a version tag it cross-compiles `latchet` for linux/macOS/Windows ×
   amd64/arm64, generates `SHA256SUMS`, **keyless-signs** the checksums with
@@ -132,13 +132,12 @@ getting started; seeds below (signed OCI builds first):
   publishes everything as release assets — so releases are SLSA L2 and the
   installation scripts have something to download. `workflow_dispatch` runs
   build+sign without cutting a release, for validation.
-- **Automated installation scripts** — one-line installers that fetch the
-  right prebuilt binary and put it on `PATH`:
-  - **Linux** — `install.sh` (curl-pipe friendly); detect arch (amd64/arm64).
-  - **macOS** — `install.sh` covering Intel and Apple Silicon; consider a
-    Homebrew formula/tap as a follow-up.
-  - **Windows** — `install.ps1` for PowerShell.
-  Depends on the release pipeline above for binaries to download.
+- ~~**Automated installation scripts**~~ — **shipped** (`scripts/install.sh`,
+  `scripts/install.ps1`). One-line installers that fetch the right prebuilt
+  binary (arch-detecting) and put it on `PATH`; `LATCHET_VERSION` /
+  `LATCHET_INSTALL_DIR` honored. Exercised once a release is published (the
+  release pipeline above provides the assets). Homebrew tap remains a
+  follow-up.
 - ~~**Global `latchet-ci.yml` config**~~ — **shipped** (`internal/globalconfig`).
   Machine-wide defaults (runtime, workspace root, log dir, `max_parallel`,
   default `env`, and the `watch:` repo list) loaded from `$LATCHET_CONFIG`,
@@ -438,6 +437,11 @@ Done so far (cont.):
 9. ~~**Release pipeline + keyless signing**~~ — shipped
    (`.github/workflows/release.yml`); tagged cross-compiled releases with
    cosign keyless-signed `SHA256SUMS` (Fulcio + Rekor) → SLSA L2 for releases.
+10. ~~**Automated installation scripts**~~ — shipped (`scripts/install.sh`,
+    `scripts/install.ps1`).
+11. ~~**Global `latchet-ci.yml` config**~~ — shipped (`internal/globalconfig`);
+    machine-wide defaults + the `watch:` repo list, with flags > env > config
+    precedence. Unblocks `latchet watch`.
 
 The supply-chain arc (Subsystems 1–4 + keyless release signing) is now
 complete. The only remaining pieces are genuinely out of scope or dependent on
@@ -448,10 +452,13 @@ image build** prebuilt action; `diffoscope` byte-diffing in `verify
 records only as hashes.
 
 Next picks (in rough order of value-per-effort):
-1. **Global `latchet-ci.yml` + `latchet watch`** — turns latchet into a
-   minimal CI server you can run from cron.
-3. **`uses` / reusable actions** — still the largest single item; do
-   it once the engine is stable and the supply-chain story is in
-   place (so fetched actions can be verified).
+1. **`latchet watch`** — git change monitoring built on the now-shipped global
+   config (the `watch:` repo list). One-shot, cron-scheduled, SSH-based;
+   turns latchet into a minimal CI server. Design in
+   [`docs/watch-plan.md`](docs/watch-plan.md).
+2. **`uses` / reusable actions** (and the **Prebuilt actions / build steps**
+   catalog, incl. signed OCI builds) — still the largest single item; do it
+   once the engine is stable and the supply-chain story is in place (so
+   fetched actions can be verified).
 
 Everything else can follow demand.
