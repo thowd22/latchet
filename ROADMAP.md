@@ -168,7 +168,21 @@ getting started; seeds below (signed OCI builds first):
     per run, the run page can surface the attestation. Bigger questions
     (triggering runs from the UI, multi-host aggregation, websockets for
     live logs) are explicit non-goals for the minimal version.
-- **Secret masking** — redact secret values from streamed logs.
+- **Secret masking** *(near-term priority)* — keep secret values out of
+  everything latchet writes. Now load-bearing: registry / cosign credentials,
+  and every **AI build step** (which takes an `ANTHROPIC_API_KEY` /
+  `OPENAI_API_KEY` via env), would otherwise leak in plaintext. Scope:
+  - **Declare secrets** — a way to mark which env values are secret (e.g. a
+    `secrets:` list of env keys at workflow/job level), since latchet has no
+    secret concept today and treats all env as plain text.
+  - **Mask in logs** — scan streamed step output and per-job log files,
+    replacing any occurrence of a secret value with `***`.
+  - **Redact in provenance** — wire the existing no-op `provenance.Redact`
+    seam (shipped with [Subsystem 1](#subsystem-1--provenance-emission-small-gets-every-run-to-slsa-l1))
+    to drop secret values from `internalParameters`, closing the documented
+    plaintext-env caveat in `provenance.json`.
+  - Open design: redacting a secret that appears only as a *substring* of
+    other output; secrets sourced from a file / external store vs. inline env.
 - **Workspace retention sweeper** — auto-clean old run directories from temp.
 - ~~**CLI flags**~~ — **shipped** (v0.2.0). `-file`, `-validate-only`,
   `-dry-run`, `-max-parallel`, `-version`, `-help`/`-h`, and a real argument
@@ -500,11 +514,16 @@ image build** prebuilt action; `diffoscope` byte-diffing in `verify
 records only as hashes.
 
 Next picks (in rough order of value-per-effort):
-1. **`latchet watch`** — git change monitoring built on the now-shipped global
+1. **Secret masking** — *critical*, and small. Closes the plaintext-env gap in
+   logs and `provenance.json` (the `provenance.Redact` seam is already in
+   place), and is a prerequisite for any step that takes a credential —
+   registry/cosign auth and every AI build step. Do this before shipping
+   credential-consuming actions.
+2. **`latchet watch`** — git change monitoring built on the now-shipped global
    config (the `watch:` repo list). One-shot, cron-scheduled, SSH-based;
    turns latchet into a minimal CI server. Design in
    [`docs/watch-plan.md`](docs/watch-plan.md).
-2. **`uses` / reusable actions** (and the **Prebuilt actions / build steps**
+3. **`uses` / reusable actions** (and the **Prebuilt actions / build steps**
    catalog, incl. signed OCI builds) — still the largest single item; do it
    once the engine is stable and the supply-chain story is in place (so
    fetched actions can be verified).
