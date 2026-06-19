@@ -393,7 +393,7 @@ log_dir: /var/log/latchet
 max_parallel: 4                 # default job concurrency
 env:                            # default env merged into every run
   REGISTRY: ghcr.io/me
-watch:                          # repositories for `latchet watch` (forthcoming)
+watch:                          # repositories for `latchet watch`
   - url: git@github.com:me/app.git
     branches: [main]
     tags: ["v*"]
@@ -405,6 +405,33 @@ defaults**. So `runtime`/`workspace_root`/`log_dir` fill the matching
 `-max-parallel` was passed, and the `env:` map is merged **below** a workflow's
 own `env:` (a workflow always overrides a machine default). Unknown keys are
 rejected, as in `latchet.yml`.
+
+## Watching repositories (`latchet watch`)
+
+`latchet watch` turns latchet into a minimal CI server. It does **one pass**
+over the repositories in the global config's `watch:` list and exits — there is
+no internal timer, so you schedule it with cron:
+
+```cron
+*/5 * * * * latchet watch        # every 5 minutes
+```
+
+Each pass runs `git ls-remote` on every watched repo and, when a configured
+**branch** has advanced or a **tag** matching a pattern (`v*`, `v1.0.0`, …) has
+appeared or moved, it clones that commit and runs the repo's `latchet.yml`.
+
+- **Fires exactly once per change.** Last-seen SHAs are kept in
+  `$XDG_STATE_HOME/latchet/watch/state.json` (override with
+  `LATCHET_WATCH_STATE`). The **first** pass for a repo (or a newly-added tag
+  pattern) records a baseline without firing.
+- **Branches and tags only** — no PR/MR triggers (see the [discover PRs/MRs
+  roadmap item](ROADMAP.md#prebuilt-actions--build-steps)). The intended
+  transport is **SSH** (your existing key; latchet does no token handling),
+  though latchet shells out to `git` and accepts any URL it resolves.
+- **Trust:** a fired run executes whatever `latchet.yml` the remote ships, in
+  the usual job containers — only watch repositories you trust.
+- A repo with no `latchet.yml`, or a `git` error on one repo, is logged and
+  skipped without aborting the pass.
 
 ## Limitations
 

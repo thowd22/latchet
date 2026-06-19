@@ -204,11 +204,19 @@ getting started; seeds below (signed OCI builds first):
   vars > global config > defaults; default `env` merges below a workflow's own.
   Strict parsing (unknown keys rejected). `%APPDATA%` on Windows is deferred.
   See [`docs/watch-plan.md`](docs/watch-plan.md).
-- **`latchet watch` — git change monitoring** — a one-shot command that
-  checks each watched repo configured in the global `latchet-ci.yml` for
-  new commits on configured branches and tags; when any watched ref
-  advances (or, for tags, appears or moves), latchet fetches the new
-  commit and runs that repo's `latchet.yml`. Constraints:
+- ~~**`latchet watch` — git change monitoring**~~ — **shipped**
+  (`internal/watch`, `latchet watch` subcommand). One pass over the
+  `watch:` repos in the global config: `git ls-remote` each, fire a run for
+  any branch that advanced or tag (matching a `v*`-style glob) that appeared
+  or moved, by cloning the commit and running its `latchet.yml`. State per
+  `(repo, ref)` in `$XDG_STATE_HOME/latchet/watch/state.json` (override
+  `LATCHET_WATCH_STATE`); first pass for a repo/tag-pattern baselines without
+  firing, so each change fires exactly once. No internal timer — schedule with
+  cron (validated end-to-end on the VM via cron + a local bare repo). The
+  fire-decision logic is a pure, unit-tested function. **Still open:** passing
+  the trigger's known ref to the run so `LATCHET_GIT_BRANCH`/`REF` reflect it
+  (a watch fire checks out a detached SHA, so `LATCHET_GIT_SHA` is exact but
+  branch is empty; tags resolve via `describe`). Original design notes:
   - **Branches and tags only.** No PR / merge-request triggers. Each
     entry in the global config is a git URL plus a list of branches
     and/or a list of tag patterns (e.g. exact tags like `v1.0.0`, or
@@ -503,6 +511,9 @@ Done so far (cont.):
     precedence. Unblocks `latchet watch`.
 12. ~~**Secret masking**~~ — shipped (`internal/mask`, `secrets:` schema);
     host-env secrets injected into steps and masked in logs + `provenance.json`.
+13. ~~**`latchet watch`**~~ — shipped (`internal/watch`); cron-scheduled git
+    change monitoring that runs a repo's latchet.yml on new commits/tags.
+    latchet is now a minimal CI server. Validated on the VM via cron.
 
 The supply-chain arc (Subsystems 1–4 + keyless release signing) is now
 complete. The only remaining pieces are genuinely out of scope or dependent on
@@ -513,11 +524,7 @@ image build** prebuilt action; `diffoscope` byte-diffing in `verify
 records only as hashes.
 
 Next picks (in rough order of value-per-effort):
-1. **`latchet watch`** — git change monitoring built on the now-shipped global
-   config (the `watch:` repo list). One-shot, cron-scheduled, SSH-based;
-   turns latchet into a minimal CI server. Design in
-   [`docs/watch-plan.md`](docs/watch-plan.md).
-2. **`uses` / reusable actions** (and the **Prebuilt actions / build steps**
+1. **`uses` / reusable actions** (and the **Prebuilt actions / build steps**
    catalog, incl. signed OCI builds — credential-taking actions are now
    unblocked by secret masking) — still the largest single item; do it once
    the engine is stable and the supply-chain story is in place (so fetched

@@ -15,6 +15,7 @@ import (
 	"github.com/thowd22/latchet/internal/engine"
 	"github.com/thowd22/latchet/internal/globalconfig"
 	"github.com/thowd22/latchet/internal/version"
+	"github.com/thowd22/latchet/internal/watch"
 )
 
 const defaultWorkflowFile = "latchet.yml"
@@ -43,6 +44,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// Subcommands are bare words (no leading dash); flags start with "-".
 	if len(args) > 0 && args[0] == "verify" {
 		return runVerify(args[1:], cfg, stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "watch" {
+		return runWatch(args[1:], cfg, stdout, stderr)
 	}
 
 	fs := flag.NewFlagSet("latchet", flag.ContinueOnError)
@@ -126,8 +130,52 @@ Flags:
 Subcommands:
   verify [flags] PROVENANCE   re-derive a run from its provenance.json and
                               compare; see 'latchet verify -h'
+  watch [flags]               check watched repos (global config) for new
+                              commits/tags and run them; see 'latchet watch -h'
 
 With no flags, latchet reads ./latchet.yml from the current directory.`)
+}
+
+// runWatch handles `latchet watch [flags]` — one pass over the repositories in
+// the global latchet-ci.yml's watch: list.
+func runWatch(args []string, cfg *globalconfig.Config, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("latchet watch", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	maxParallel := fs.Int("max-parallel", runtime.NumCPU(), "maximum jobs to run concurrently per fired run")
+	fs.Usage = func() { printWatchUsage(stderr) }
+	if err := fs.Parse(args); err != nil {
+		return engine.ExitConfig
+	}
+
+	parallel := *maxParallel
+	if cfg.MaxParallel > 0 && !flagSet(fs, "max-parallel") {
+		parallel = cfg.MaxParallel
+	}
+	return watch.Run(cfg, watch.Options{
+		MaxParallel: parallel,
+		DefaultEnv:  cfg.Env,
+		Stdout:      stdout,
+		Stderr:      stderr,
+	})
+}
+
+func printWatchUsage(w io.Writer) {
+	fmt.Fprintln(w, `latchet watch — run watched repositories on new commits and tags
+
+Usage:
+  latchet watch [flags]
+
+Does one pass over the repositories in the global latchet-ci.yml 'watch:' list:
+for each, it checks the configured branches and tag patterns and, when a ref has
+advanced (or a new/moved tag appears), clones that commit and runs the repo's
+latchet.yml. The first pass for a repo/tag-pattern records a baseline without
+firing. There is no internal timer — schedule it with cron.
+
+Flags:
+  -max-parallel N  maximum jobs to run concurrently per fired run
+
+Last-seen state is kept in $XDG_STATE_HOME/latchet/watch/state.json
+(override with LATCHET_WATCH_STATE).`)
 }
 
 // flagSet reports whether the named flag was explicitly passed on the command

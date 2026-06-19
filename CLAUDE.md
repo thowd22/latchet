@@ -77,9 +77,17 @@ hermetically.
 
 `LATCHET_RUNTIME`, `LATCHET_WORKSPACE_ROOT`, `LATCHET_KEEP_WORKSPACE`,
 `LATCHET_LOG_DIR`, `LATCHET_COSIGN_KEY`, `LATCHET_COSIGN_TLOG`,
-`LATCHET_DETERMINISTIC`. Distinct from
+`LATCHET_DETERMINISTIC`, `LATCHET_CONFIG` (global `latchet-ci.yml` path),
+`LATCHET_WATCH_STATE` (`latchet watch` state file). Distinct from
 the output-only `LATCHET_*` vars `builtinenv` *injects* into steps
 (`LATCHET_WORKSPACE`, `LATCHET_RUN_ID`, `LATCHET_JOB_ID`, `LATCHET_GIT_*`).
+
+Subcommands: `latchet verify <provenance.json>` (`engine.Verify`) and
+`latchet watch` (`internal/watch`; cron-scheduled, runs watched repos'
+`latchet.yml` on new commits/tags). Secrets: `secrets:` (workflow/job) names
+host env vars injected into steps and masked in logs + provenance
+(`internal/mask`, `provenance.Redact`). Global config: `internal/globalconfig`
+(`latchet-ci.yml`).
 
 Each run emits `<logdir>/provenance.json` (SLSA v1.0, `internal/provenance`),
 optionally signed via cosign (`internal/signer`) when `LATCHET_COSIGN_KEY` is
