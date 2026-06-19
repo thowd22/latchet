@@ -58,6 +58,34 @@ getting started; seeds below (signed OCI builds first):
   - Complements `latchet watch` (Operational section), which is intentionally
     branches/tags only — this is the opt-in building block toward the deferred
     PR/MR-trigger story, without baking provider APIs into the core.
+- **AI build steps** *(prebuild actions)* — LLM-backed steps for the assistive
+  parts of a pipeline: review a diff, summarize a PR/MR (pairs with **Discover
+  open PRs / MRs** above), draft release notes / changelogs, triage test
+  failures, or generate docs. Shared design: input read from `/workspace` (the
+  diff, files), output written back to `/workspace`; the API key comes from an
+  env var and is never handled by latchet core. ⚠️ Until secret masking lands,
+  env values are recorded in `provenance.json` (see
+  [README](README.md#provenance-slsa)). Unlike the CLI-adapter action above, a
+  prebuilt action runs as its **own container image**, so it may bundle a
+  provider SDK internally without touching latchet's one-dependency rule. Three
+  flavors:
+  - **OpenAI-compatible** *(provider-agnostic)* — calls any
+    `/v1/chat/completions`-shaped endpoint via a configurable base URL + model
+    + API key, so one action serves OpenAI, Azure OpenAI, OpenRouter, Together,
+    and local/self-hosted servers (Ollama, vLLM, llama.cpp). The portable
+    default.
+  - **Claude (Anthropic)** *(provider-specific)* — uses the native Anthropic
+    **Messages API** (`ANTHROPIC_API_KEY`, official `anthropic-sdk-go`) so it
+    can reach Claude-specific capabilities the compatible shape can't express:
+    adaptive thinking + `effort`, the 1M-token context window, prompt caching,
+    vision / PDF input, structured outputs, and tool use. Defaults to the
+    latest, most capable model (`claude-opus-4-8`; also `claude-sonnet-4-6` /
+    `claude-haiku-4-5` / `claude-fable-5`), and can target the first-party API,
+    Amazon Bedrock, Google Vertex AI, or Microsoft Foundry.
+  - **ChatGPT (OpenAI)** *(provider-specific)* — uses OpenAI's native API
+    (Responses / Chat Completions, `OPENAI_API_KEY`) for OpenAI-specific
+    features beyond the portable `/v1/chat/completions` subset (native
+    structured outputs, function calling, the Responses API tool surface).
 - _(more to come — SBOM generation (`syft`), artifact upload/download, etc.)_
 
 - ~~**Parallel job execution**~~ — **shipped** (v0.2.0). Jobs whose `needs` are
