@@ -38,6 +38,26 @@ getting started; seeds below (signed OCI builds first):
 - **Dependency cache** *(prebuild action)* — restore/save a keyed cache
   (Go modules, npm, pip, …); the step form of the
   [shared cache mount](#workflow-features) item.
+- **Discover open PRs / MRs** *(prebuild action)* — query the host platform
+  for the repo's open pull/merge requests and expose them to the workflow
+  (number, source branch, head SHA, base branch, title, author, labels), so a
+  workflow can run checks against each. Design tenets, in latchet's idiom:
+  - **CLI adapters, no SDK.** Shell out to `gh pr list --json …` /
+    `glab mr list -F json` as **soft dependencies** (reusing the user's
+    existing `gh`/`glab` auth), instead of vendoring a GitHub/GitLab Go SDK —
+    preserves the one-dependency rule and stays provider-agnostic. Provider is
+    detected from the remote host (`github.com` → `gh`, `gitlab.*` → `glab`),
+    overridable; self-hosted instances supported via the CLIs' own config.
+  - **Output as data, not control flow.** Writes the PR/MR list as JSON to
+    `/workspace` (and/or step outputs, once those exist) for downstream steps
+    to consume. latchet has no token handling — auth lives entirely in the
+    CLI.
+  - **Pairs with fan-out.** Acting *per* PR/MR needs
+    [`strategy.matrix`](#workflow-features) or dynamic job generation (neither
+    exists yet), so discovery ships first and the per-PR fan-out follows.
+  - Complements `latchet watch` (Operational section), which is intentionally
+    branches/tags only — this is the opt-in building block toward the deferred
+    PR/MR-trigger story, without baking provider APIs into the core.
 - _(more to come — SBOM generation (`syft`), artifact upload/download, etc.)_
 
 - ~~**Parallel job execution**~~ — **shipped** (v0.2.0). Jobs whose `needs` are
