@@ -156,6 +156,24 @@ has "workflow env overrides config env" "$GA" "PREC=workflow-level"
 printf 'bogus_key: 1\n' > "$TMP/badcfg.yml"
 ec "bad global config -> exit 2" 2 env LATCHET_CONFIG="$TMP/badcfg.yml" "$LATCHET" -file ci/gc-demo.yml
 
+echo "===== LOCATION + CONDITIONALS ====="
+# Default location is "local" -> else branch runs, prod/staging skipped.
+CLLOGS="$TMP/logs-cond-local"
+env -u LATCHET_LOCATION LATCHET_LOG_DIR="$CLLOGS" "$LATCHET" -file ci/cond-demo.yml >/dev/null 2>&1
+CL="$CLLOGS/latest/deploy.log"
+has "default LATCHET_LOCATION is local" "$CL" "LOC=local"
+has "local: else branch runs"           "$CL" "BRANCH=none"
+grep -qF "BRANCH=prod" "$CL" && bad "local: if branch skipped" || ok "local: if branch skipped"
+has "local: skipped step logged"        "$CL" "prod -> skipped (if condition false)"
+# location = server -> if branch runs, elif + else skipped.
+CSLOGS="$TMP/logs-cond-server"
+LATCHET_LOCATION=server LATCHET_LOG_DIR="$CSLOGS" "$LATCHET" -file ci/cond-demo.yml >/dev/null 2>&1
+CS="$CSLOGS/latest/deploy.log"
+has "server: LATCHET_LOCATION injected"  "$CS" "LOC=server"
+has "server: if branch runs (prod)"      "$CS" "BRANCH=prod"
+grep -qF "BRANCH=staging" "$CS" && bad "server: elif skipped" || ok "server: elif skipped"
+grep -qF "BRANCH=none" "$CS" && bad "server: else skipped" || ok "server: else skipped"
+
 echo "===== SECRET MASKING ====="
 SECRET="s3cr3t-$(echo abcXYZ | tr a-z A-Z)0123456789"   # fixed, distinctive value
 SLEN=${#SECRET}

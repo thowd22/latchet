@@ -31,6 +31,7 @@ func TestFor(t *testing.T) {
 		SHA:    "deadbeef",
 		Ref:    "refs/heads/main",
 	}
+	t.Setenv("LATCHET_LOCATION", "") // default to "local"
 	got := For("20260611T120000-abc123", "build", "/workspace", git)
 	want := map[string]string{
 		"LATCHET_WORKSPACE":  "/workspace",
@@ -41,6 +42,7 @@ func TestFor(t *testing.T) {
 		"LATCHET_GIT_TAG":    "",
 		"LATCHET_GIT_SHA":    "deadbeef",
 		"LATCHET_GIT_REF":    "refs/heads/main",
+		"LATCHET_LOCATION":   "local",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("For() = %v, want %v", got, want)
@@ -94,5 +96,16 @@ func TestOverrideRef(t *testing.T) {
 	u := OverrideRef(Git{Branch: "keep"}, "refs/pull/7/head")
 	if u.Branch != "keep" {
 		t.Errorf("unknown ref should not change git: %+v", u)
+	}
+}
+
+func TestLocation(t *testing.T) {
+	t.Setenv("LATCHET_LOCATION", "")
+	if got := Location(); got != "local" {
+		t.Errorf("default Location() = %q, want local", got)
+	}
+	t.Setenv("LATCHET_LOCATION", "server")
+	if got := Location(); got != "server" {
+		t.Errorf("Location() = %q, want server", got)
 	}
 }

@@ -12,6 +12,7 @@ package builtinenv
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -31,7 +32,24 @@ const (
 	GitTag    = "LATCHET_GIT_TAG"
 	GitSHA    = "LATCHET_GIT_SHA"
 	GitRef    = "LATCHET_GIT_REF"
+
+	// LocationVar identifies where the run is executing (e.g. "server" vs
+	// "local"); resolved from the LATCHET_LOCATION env var (set by the global
+	// config), defaulting to "local".
+	LocationVar = "LATCHET_LOCATION"
 )
+
+// DefaultLocation is used when LATCHET_LOCATION is unset.
+const DefaultLocation = "local"
+
+// Location returns the run location: the LATCHET_LOCATION env var if set
+// (the global config fills it via ApplyEnvDefaults), else "local".
+func Location() string {
+	if v := os.Getenv(LocationVar); v != "" {
+		return v
+	}
+	return DefaultLocation
+}
 
 // Git holds the source-control facts injected as LATCHET_GIT_* vars. Any field
 // that cannot be determined is the empty string.
@@ -117,14 +135,15 @@ func DeriveRef(branch, tag string) string {
 // workspace path (typically "/workspace").
 func For(runID, jobID, workspace string, git Git) map[string]string {
 	return map[string]string{
-		Workspace: workspace,
-		RunID:     runID,
-		JobID:     jobID,
-		GitURL:    git.URL,
-		GitBranch: git.Branch,
-		GitTag:    git.Tag,
-		GitSHA:    git.SHA,
-		GitRef:    git.Ref,
+		Workspace:   workspace,
+		RunID:       runID,
+		JobID:       jobID,
+		GitURL:      git.URL,
+		GitBranch:   git.Branch,
+		GitTag:      git.Tag,
+		GitSHA:      git.SHA,
+		GitRef:      git.Ref,
+		LocationVar: Location(),
 	}
 }
 

@@ -152,6 +152,7 @@ prefix keeps them from colliding with workflow- or image-defined variables.
 | `LATCHET_GIT_TAG` | tag name when HEAD is exactly a tag, else empty |
 | `LATCHET_GIT_SHA` | full commit SHA of HEAD |
 | `LATCHET_GIT_REF` | full ref, e.g. `refs/heads/main` or `refs/tags/v1.0.0` |
+| `LATCHET_LOCATION` | where the run is executing (e.g. `server` vs `local`); see [Run location](#run-location-and-conditional-steps) |
 
 The `LATCHET_GIT_*` values are read from the host working directory via `git`
 (best-effort: empty strings when run outside a git checkout or with no `git`
@@ -345,6 +346,60 @@ jobs:
 > Masking is substring-based, so avoid declaring a secret whose value is a
 > short common string — it would mask unrelated output.
 
+## Run location and conditional steps
+
+`LATCHET_LOCATION` tells a run *where* it's executing, so a workflow can behave
+differently on the latchet server vs a developer's laptop (e.g. only deploy
+from the server). It is **machine-scoped**, set in the global
+[`latchet-ci.yml`](#global-configuration) — a per-project `latchet.yml` is the
+same on every machine and can't distinguish them:
+
+```yaml
+# the latchet server's ~/.config/latchet/latchet-ci.yml
+location: server
+```
+
+Resolution is `LATCHET_LOCATION` env var → global config `location:` →
+`local` (default). The value is injected as the `LATCHET_LOCATION` built-in
+step var. `latchet watch` runs (which execute on the server) inherit it
+automatically.
+
+### Conditional steps (`if` / `elif` / `else`)
+
+A step may carry a condition. `if:` starts a chain, `elif:` continues it, and
+`else: true` is the fallback — the **first** branch whose condition is true
+runs; the others are skipped (and logged as skipped). A plain step (no
+condition) always runs and ends any open chain.
+
+```yaml
+steps:
+  - run: make build                  # always runs
+  - if: $LATCHET_LOCATION == server
+    run: ./deploy prod
+  - elif: $LATCHET_LOCATION == staging
+    run: ./deploy staging
+  - else: true
+    run: echo "no deploy on $LATCHET_LOCATION"
+```
+
+Conditions are a small boolean language evaluated by latchet (not the shell)
+against the step's merged env:
+
+- **Values:** `$VAR` / `${VAR}` expand from the env (missing → empty); bare
+  words and `'…'`/`"…"` are literals.
+- **Operators:** `==`, `!=`, `&&`, `||`, `!`, and parentheses. A lone value is
+  truthy when non-empty and not `false`/`0`.
+
+```yaml
+  - if: $LATCHET_LOCATION == server && $LATCHET_GIT_BRANCH == main
+    run: ./release
+```
+
+Invalid `if:`/`elif:` expressions and malformed chains (an `elif`/`else` with no
+preceding `if`) are rejected at load time (exit code `2`). To skip an entire
+*job* by condition, gate the steps inside it — job-level conditionals are a
+[roadmap item](ROADMAP.md#workflow-features).
+
 ## Sharing files between jobs
 
 A job may declare `inherit: <parent-id>` to start with the named parent's
@@ -391,6 +446,7 @@ runtime: podman                 # preferred container runtime
 workspace_root: /var/lib/latchet/ws
 log_dir: /var/log/latchet
 max_parallel: 4                 # default job concurrency
+location: server                # injected as LATCHET_LOCATION (default "local")
 env:                            # default env merged into every run
   REGISTRY: ghcr.io/me
 watch:                          # repositories for `latchet watch`

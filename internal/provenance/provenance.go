@@ -90,6 +90,9 @@ type StepParams struct {
 	Name string            `json:"name,omitempty"`
 	Run  string            `json:"run"`
 	Env  map[string]string `json:"env,omitempty"`
+	If   string            `json:"if,omitempty"`
+	Elif string            `json:"elif,omitempty"`
+	Else bool              `json:"else,omitempty"`
 }
 
 // Dependency is a build input pinned to a resolved digest (here, container

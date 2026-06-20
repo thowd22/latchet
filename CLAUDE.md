@@ -87,7 +87,9 @@ Subcommands: `latchet verify <provenance.json>` (`engine.Verify`) and
 `latchet.yml` on new commits/tags). Secrets: `secrets:` (workflow/job) names
 host env vars injected into steps and masked in logs + provenance
 (`internal/mask`, `provenance.Redact`). Global config: `internal/globalconfig`
-(`latchet-ci.yml`).
+(`latchet-ci.yml`) — also sets `location:` → `LATCHET_LOCATION` built-in.
+Step conditionals: `if:`/`elif:`/`else:` on steps, evaluated by `internal/cond`
+(`$VAR`, `==`/`!=`/`&&`/`||`/`!`, parens) against the step's merged env.
 
 Each run emits `<logdir>/provenance.json` (SLSA v1.0, `internal/provenance`),
 optionally signed via cosign (`internal/signer`) when `LATCHET_COSIGN_KEY` is

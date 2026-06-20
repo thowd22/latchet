@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/thowd22/latchet/internal/builtinenv"
+	"github.com/thowd22/latchet/internal/cond"
 	"github.com/thowd22/latchet/internal/config"
 	"github.com/thowd22/latchet/internal/dag"
 	"github.com/thowd22/latchet/internal/envutil"
@@ -215,6 +216,48 @@ func resolveSecrets(wf *config.Workflow, job *config.Job) map[string]string {
 	return out
 }
 
+// stepShouldRun applies a step's if/elif/else condition against the merged env,
+// updating the chain state. A plain step always runs and ends any open chain;
+// within an if/elif/else chain the first branch whose condition is true runs
+// and the rest are skipped. Returns (run, skipReason, evalError).
+func stepShouldRun(step *config.Step, env map[string]string, chainTaken *bool) (bool, string, error) {
+	switch {
+	case step.If != "":
+		*chainTaken = false
+		ok, err := cond.Eval(step.If, env)
+		if err != nil {
+			return false, "", fmt.Errorf("if: %w", err)
+		}
+		if ok {
+			*chainTaken = true
+			return true, "", nil
+		}
+		return false, "if condition false", nil
+	case step.Elif != "":
+		if *chainTaken {
+			return false, "an earlier branch ran", nil
+		}
+		ok, err := cond.Eval(step.Elif, env)
+		if err != nil {
+			return false, "", fmt.Errorf("elif: %w", err)
+		}
+		if ok {
+			*chainTaken = true
+			return true, "", nil
+		}
+		return false, "elif condition false", nil
+	case step.Else:
+		if *chainTaken {
+			return false, "an earlier branch ran", nil
+		}
+		*chainTaken = true
+		return true, "", nil
+	default:
+		*chainTaken = false
+		return true, "", nil
+	}
+}
+
 // secretValues returns just the values of a resolved-secrets map.
 func secretValues(m map[string]string) []string {
 	vals := make([]string, 0, len(m))
@@ -261,14 +304,27 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 	}
 	defer rt.Remove(container)
 
+	chainTaken := false // an if/elif chain has already taken a branch
 	for i, step := range job.Steps {
 		name := step.Name
 		if name == "" {
 			name = fmt.Sprintf("step %d", i+1)
 		}
+
+		// Conditions evaluate against the step's full merged env, so they can
+		// read LATCHET_LOCATION, LATCHET_GIT_*, and any user/secret vars.
+		merged := mergeEnv(builtins, wf.Env, job.Env, secretEnv, step.Env)
+		run, skipReason, err := stepShouldRun(step, merged, &chainTaken)
+		if err != nil {
+			return scheduler.Result{ID: job.ID}, fmt.Errorf("job %q %s: %w", job.ID, name, err)
+		}
+		if !run {
+			log.StepSkip(out, name, skipReason)
+			continue
+		}
 		log.StepStart(out, name)
 
-		env := envutil.Merge(builtins, wf.Env, job.Env, secretEnv, step.Env)
+		env := envutil.Merge(merged)
 		start := time.Now()
 		code, err := rt.Exec(ctx, container, env, step.Run, out, out)
 		if err != nil {

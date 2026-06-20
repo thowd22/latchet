@@ -67,6 +67,9 @@ func emitProvenance(ctx context.Context, ws *workspace.Run, ls *logstore.Run, wf
 				Name: st.Name,
 				Run:  provenance.RedactString(st.Run, secrets),
 				Env:  provenance.Redact(merged, secrets),
+				If:   st.If,
+				Elif: st.Elif,
+				Else: st.Else,
 			})
 		}
 		jobs = append(jobs, provenance.JobParams{ID: id, Image: job.Container, Steps: steps})

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/thowd22/latchet/internal/cond"
 	"github.com/thowd22/latchet/internal/dag"
 	"gopkg.in/yaml.v3"
 )
@@ -43,11 +44,40 @@ type Job struct {
 	Secrets       []string          `yaml:"secrets"`       // host env var names injected + masked for this job
 }
 
-// Step is one shell command run inside its job's container.
+// Step is one shell command run inside its job's container. A step may carry a
+// condition: `if:` starts a chain, `elif:` continues it, and `else: true` is
+// the fallback. Within a chain the first branch whose condition is true runs;
+// the rest are skipped. A plain step (no condition) ends any open chain.
 type Step struct {
 	Name string            `yaml:"name"`
 	Run  string            `yaml:"run"`
 	Env  map[string]string `yaml:"env"`
+	If   string            `yaml:"if"`   // condition; starts a conditional chain
+	Elif string            `yaml:"elif"` // condition; continues the preceding if/elif chain
+	Else bool              `yaml:"else"` // `else: true`; fallback branch of the chain
+}
+
+// kind classifies a step's role in a conditional chain.
+type stepKind int
+
+const (
+	stepPlain stepKind = iota
+	stepIf
+	stepElif
+	stepElse
+)
+
+func (s *Step) kind() stepKind {
+	switch {
+	case s.If != "":
+		return stepIf
+	case s.Elif != "":
+		return stepElif
+	case s.Else:
+		return stepElse
+	default:
+		return stepPlain
+	}
 }
 
 // StringOrSlice accepts a YAML value that is either a single scalar or a
@@ -135,9 +165,46 @@ func (wf *Workflow) Validate() error {
 		if len(job.Steps) == 0 {
 			errs = append(errs, fmt.Sprintf("job %q: has no steps", id))
 		}
+		chainOpen := false // a preceding if/elif a following elif/else can attach to
 		for i, step := range job.Steps {
 			if step == nil || strings.TrimSpace(step.Run) == "" {
 				errs = append(errs, fmt.Sprintf("job %q: step %d has an empty 'run'", id, i+1))
+				continue
+			}
+			// At most one of if/elif/else.
+			set := 0
+			if step.If != "" {
+				set++
+			}
+			if step.Elif != "" {
+				set++
+			}
+			if step.Else {
+				set++
+			}
+			if set > 1 {
+				errs = append(errs, fmt.Sprintf("job %q: step %d uses more than one of if/elif/else", id, i+1))
+			}
+			switch step.kind() {
+			case stepIf:
+				if err := cond.Check(step.If); err != nil {
+					errs = append(errs, fmt.Sprintf("job %q: step %d if: %v", id, i+1, err))
+				}
+				chainOpen = true
+			case stepElif:
+				if !chainOpen {
+					errs = append(errs, fmt.Sprintf("job %q: step %d elif: must follow an if/elif step", id, i+1))
+				}
+				if err := cond.Check(step.Elif); err != nil {
+					errs = append(errs, fmt.Sprintf("job %q: step %d elif: %v", id, i+1, err))
+				}
+			case stepElse:
+				if !chainOpen {
+					errs = append(errs, fmt.Sprintf("job %q: step %d else: must follow an if/elif step", id, i+1))
+				}
+				chainOpen = false // else closes the chain
+			default: // plain step ends any chain
+				chainOpen = false
 			}
 		}
 		for _, need := range job.Needs {

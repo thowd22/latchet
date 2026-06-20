@@ -98,31 +98,22 @@ getting started; seeds below (signed OCI builds first):
   fan-in merges, exclude patterns, and persistence across runs.
 
 ### Workflow features
-- **Run location (`LATCHET_LOCATION`)** — let a run know whether it's executing
-  on the latchet server vs a developer workstation, so steps/jobs can be skipped
-  or gated by environment (e.g. only deploy from the server, skip slow
-  integration tests on a laptop).
-  - **Where the value lives — machine-scoped, not per-project.** A per-project
-    `latchet.yml` is byte-identical on every machine, so a `location:` *there*
-    can't differentiate them. The location belongs in the **machine-scoped
-    global config** (`latchet-ci.yml`,
-    `location: server | local | <any string>`), with a `LATCHET_LOCATION` env
-    var override (highest precedence) and a default of `local`. The latchet
-    server's global config sets `location: server`; a workstation leaves it
-    unset → `local`. `latchet watch` runs (which execute on the server) pick up
-    the server's value automatically.
-  - **Inject `LATCHET_LOCATION`** as a built-in step var (alongside the existing
-    `LATCHET_*`), overridable like the others — so `run:` scripts can branch on
-    it today: `if [ "$LATCHET_LOCATION" = server ]; then ./deploy; fi`. This
-    half is small (a `globalconfig` field + one `builtinenv` var) and could ship
-    on its own.
-  - **Conditional execution (follow-on, larger).** A `when:`/`if:` on jobs and
-    steps — e.g. `when: $LATCHET_LOCATION == server` — to *skip* a job/step
-    rather than gate inside a `run:`. latchet has no conditional execution
-    today; this is the bigger piece and would generalize beyond location (any
-    expression), pairing with `strategy.matrix` and `on:` gating. The DAG
-    skip-propagation machinery already exists, so a skipped-by-condition job
-    behaves like one whose dependency was skipped.
+- ~~**Run location (`LATCHET_LOCATION`)**~~ — **shipped**
+  (`globalconfig.Location`, `builtinenv.Location`). Machine-scoped location
+  injected as the `LATCHET_LOCATION` built-in step var; resolution is the
+  `LATCHET_LOCATION` env var → global config `location:` → `local` default. Set
+  `location: server` in the server's `latchet-ci.yml`; `latchet watch` runs
+  inherit it. (Correct by design: the value lives in the machine-scoped global
+  config, not the per-project `latchet.yml`, which is identical everywhere.)
+- ~~**Step conditionals (`if`/`elif`/`else`)**~~ — **shipped** (`internal/cond`,
+  wired in `engine.runJob`). A step may carry `if:`/`elif:`/`else: true`; within
+  a chain the first true branch runs and the rest are skipped (logged). The
+  condition language (`$VAR` expansion, `==`/`!=`/`&&`/`||`/`!`, parens,
+  truthiness) is evaluated by latchet against the step's merged env, validated
+  at load time. **Still open:** **job-level** conditionals — a `when:`/`if:` to
+  skip a whole *job* (reusing the DAG skip-propagation, so a
+  conditionally-skipped job propagates to its dependents like a needs-skip).
+  Today you gate the steps inside a job instead.
 - **`strategy.matrix`** — fan a job across combinations of variables (e.g.
   multiple language versions).
 - **`on` / triggers** — event-based triggering instead of "run the whole file
@@ -539,6 +530,9 @@ Done so far (cont.):
 13. ~~**`latchet watch`**~~ — shipped (`internal/watch`); cron-scheduled git
     change monitoring that runs a repo's latchet.yml on new commits/tags.
     latchet is now a minimal CI server. Validated on the VM via cron.
+14. ~~**Run location + step conditionals**~~ — shipped (`LATCHET_LOCATION`
+    built-in via global config; `if`/`elif`/`else` on steps via `internal/cond`).
+    Job-level conditionals remain open.
 
 The supply-chain arc (Subsystems 1–4 + keyless release signing) is now
 complete. The only remaining pieces are genuinely out of scope or dependent on

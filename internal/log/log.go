@@ -42,6 +42,11 @@ func StepEnd(w io.Writer, name string, ok bool, d time.Duration) {
 	fmt.Fprintf(w, "-- step: %s -> %s (%s) --\n", name, status, d.Round(time.Millisecond))
 }
 
+// StepSkip prints that a step was skipped by its condition.
+func StepSkip(w io.Writer, name, reason string) {
+	fmt.Fprintf(w, "-- step: %s -> skipped (%s) --\n", name, reason)
+}
+
 // SummaryHeader prints the heading for the per-job summary table.
 func SummaryHeader(w io.Writer) {
 	fmt.Fprintln(w, "\n== summary ==")

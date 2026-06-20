@@ -28,6 +28,7 @@ type Config struct {
 	WorkspaceRoot string            `yaml:"workspace_root"`
 	LogDir        string            `yaml:"log_dir"`
 	MaxParallel   int               `yaml:"max_parallel"`
+	Location      string            `yaml:"location"` // machine identity injected as LATCHET_LOCATION (default "local")
 	Env           map[string]string `yaml:"env"`
 	Watch         []WatchEntry      `yaml:"watch"`
 
@@ -124,6 +125,7 @@ func (c *Config) ApplyEnvDefaults() {
 	setIfUnset("LATCHET_RUNTIME", c.Runtime)
 	setIfUnset("LATCHET_WORKSPACE_ROOT", c.WorkspaceRoot)
 	setIfUnset("LATCHET_LOG_DIR", c.LogDir)
+	setIfUnset("LATCHET_LOCATION", c.Location)
 }
 
 func setIfUnset(key, val string) {

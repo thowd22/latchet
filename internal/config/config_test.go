@@ -139,6 +139,26 @@ func TestValidate(t *testing.T) {
 			yaml:    "jobs:\n  a:\n    container: x\n    steps: [{run: echo a}]\n  b:\n    container: x\n    inherit: a\n    steps: [{run: echo b}]\n",
 			wantSub: `inherits from "a" but does not list it in needs`,
 		},
+		{
+			name:    "elif without if",
+			yaml:    "jobs:\n  a:\n    container: x\n    steps:\n      - {elif: \"$X == 1\", run: echo a}\n",
+			wantSub: "elif: must follow an if/elif step",
+		},
+		{
+			name:    "else without if",
+			yaml:    "jobs:\n  a:\n    container: x\n    steps:\n      - {else: true, run: echo a}\n",
+			wantSub: "else: must follow an if/elif step",
+		},
+		{
+			name:    "bad if expression",
+			yaml:    "jobs:\n  a:\n    container: x\n    steps:\n      - {if: \"$X = 1\", run: echo a}\n",
+			wantSub: "step 1 if:",
+		},
+		{
+			name:    "both if and else",
+			yaml:    "jobs:\n  a:\n    container: x\n    steps:\n      - {if: \"$X == 1\", else: true, run: echo a}\n",
+			wantSub: "more than one of if/elif/else",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -216,5 +236,24 @@ jobs:
 	}
 	if got := wf.Jobs["child"].Inherit; got != "parent" {
 		t.Errorf("Inherit not populated: got %q, want %q", got, "parent")
+	}
+}
+
+func TestValidateConditionChainOK(t *testing.T) {
+	wf, err := Load(write(t, `
+jobs:
+  a:
+    container: x
+    steps:
+      - {run: make build}
+      - {if: "$LATCHET_LOCATION == server", run: ./deploy prod}
+      - {elif: "$LATCHET_LOCATION == staging", run: ./deploy staging}
+      - {else: true, run: echo "no deploy on $LATCHET_LOCATION"}
+`))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := wf.Validate(); err != nil {
+		t.Fatalf("valid if/elif/else chain rejected: %v", err)
 	}
 }
