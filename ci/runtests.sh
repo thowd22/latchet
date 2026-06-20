@@ -174,6 +174,17 @@ has "server: if branch runs (prod)"      "$CS" "BRANCH=prod"
 grep -qF "BRANCH=staging" "$CS" && bad "server: elif skipped" || ok "server: elif skipped"
 grep -qF "BRANCH=none" "$CS" && bad "server: else skipped" || ok "server: else skipped"
 
+echo "===== COMBINED (matrix + function + outputs + conditionals) ====="
+CMLOGS="$TMP/logs-combined"
+LATCHET_LOCATION=server LATCHET_LOG_DIR="$CMLOGS" "$LATCHET" -file ci/combined-demo.yml >"$TMP/cm.out" 2>&1
+has "combined: matrix expanded"        "$TMP/cm.out" "build (arch=arm64)   success"
+has "combined: function inlined"       "$CMLOGS/latest/build (arch=amd64).log" "ANNOUNCE build amd64 loc=server"
+has "combined: step if branch"         "$CMLOGS/latest/build (arch=amd64).log" "PRIMARY arch amd64"
+has "combined: step else branch"       "$CMLOGS/latest/build (arch=arm64).log" "secondary arch arm64"
+has "combined: cross-job output + job if" "$CMLOGS/latest/deploy.log" "DEPLOY got ARTIFACT=app-"
+env -u LATCHET_LOCATION LATCHET_LOG_DIR="$TMP/cm-local" "$LATCHET" -file ci/combined-demo.yml >"$TMP/cm2.out" 2>&1
+has "combined: deploy job-if skips on local" "$TMP/cm2.out" "deploy               skipped"
+
 echo "===== FUNCTIONS ====="
 FLOGS="$TMP/logs-fn"
 LATCHET_LOCATION=server LATCHET_LOG_DIR="$FLOGS" "$LATCHET" -file ci/fn-demo.yml >/dev/null 2>&1

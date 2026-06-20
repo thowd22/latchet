@@ -1,0 +1,30 @@
+name: combined-demo
+# Exercises every recent feature at once: a function (call:), a matrix job with
+# step outputs + step conditionals, cross-job outputs, and a job-level if:.
+functions:
+  announce:
+    inputs:
+      what: {required: true}
+    steps:
+      - run: echo "ANNOUNCE $what loc=$LATCHET_LOCATION"
+jobs:
+  build:
+    container: alpine:3.19
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    outputs: [ARTIFACT]
+    steps:
+      - run: echo "ARTIFACT=app-$arch" >> "$LATCHET_ENV"   # step output
+      - call: announce
+        with: {what: "build $arch"}                        # function call (with-expansion)
+      - if: $arch == amd64
+        run: echo "PRIMARY arch $arch"                     # step conditional
+      - else: true
+        run: echo "secondary arch $arch"
+  deploy:
+    container: alpine:3.19
+    needs: build                                           # depends on ALL matrix expansions
+    if: $LATCHET_LOCATION == server                        # job conditional
+    steps:
+      - run: echo "DEPLOY got ARTIFACT=$ARTIFACT"          # cross-job output
