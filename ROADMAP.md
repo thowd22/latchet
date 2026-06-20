@@ -148,45 +148,32 @@ getting started; seeds below (signed OCI builds first):
   prerequisite several items already lean on: **Functions'** `outputs:`,
   **`strategy.matrix`** fan-in, the **Discover PRs/MRs** action, and job-level
   conditionals.
-  Hybrid model — **set the easy (Jenkins) way, read either flat or namespaced:**
-  - **Set** by appending `NAME=value` to a built-in `$LATCHET_ENV` file (a plain
-    shell append, no ceremony). latchet reads that file host-side after each
-    step's `exec` — feasible because `$LATCHET_ENV` lives under the job's
-    `/workspace`, already bind-mounted (`<jobDir>/…`), so no in-container agent
-    is needed. A step needs an `id:` for its outputs to be addressable.
+  **Outputs are plain env vars (the Jenkins model)** — consistent with how
+  everything else in latchet works (`$VAR` in `run:`, in `if:` conditions, and
+  in injected `LATCHET_*` vars), and **no `${{ }}` templating** to introduce.
+  - **Set** by appending `NAME=value` to a built-in `$LATCHET_ENV` file — a
+    plain shell append, no ceremony. After the step finishes latchet reads that
+    file and merges the new vars into the env of every **subsequent step in the
+    same job**, so passing a value between steps is just:
 
     ```yaml
     steps:
-      - id: meta
-        run: echo "version=$(cat VERSION)" >> "$LATCHET_ENV"
-      - run: echo "building $version"                          # flat env var
-      - run: ./release "${{ steps.meta.outputs.version }}"     # namespaced
+      - run: echo "VERSION=$(cat VERSION)" >> "$LATCHET_ENV"
+      - run: echo "building $VERSION"        # VERSION is now a normal env var
     ```
-  - **Read, flat** — within the same job, later steps see the value as a plain
-    env var (`$version`). latchet merges the file into their env. Zero ceremony;
-    last-writer-wins on a name clash.
-  - **Read, namespaced** — `${{ steps.<id>.outputs.<name> }}` (and across jobs,
-    `${{ needs.<job>.outputs.<name> }}`) for explicit, collision-free access.
-    latchet substitutes these in the `run:` string *before* `sh -c`.
-  - **Why `${{ }}` and not `$steps.id.outputs.x`.** POSIX `sh` can't dereference
-    a dotted name — `$steps.build.outputs.x` parses as `$steps` + literal text —
-    so a bare dotted `$`-reference can't be an env var. The `${{ }}` delimiter is
-    unambiguous and lets latchet expand **only** output references while leaving
-    every ordinary `$VAR` to the shell. Keep the substitution **tightly scoped**
-    to `steps.*.outputs.*` / `needs.*.outputs.*` (perhaps `env.*`) — a bounded
-    token substitution, *not* a general expression language (no `github.*`,
-    arithmetic, or `${{ }}` functions), so latchet's "pass `run:` to `sh`
-    verbatim" philosophy bends only as far as needed.
+  - **Feasible with the existing mount.** `$LATCHET_ENV` lives under the job's
+    `/workspace` (host-side `<jobDir>/…`), already bind-mounted, so latchet reads
+    it host-side after each `exec` — no in-container agent needed. The injected
+    outputs sit above job/workflow env (a later step's own `env:` still wins);
+    last-writer-wins when two steps set the same name.
   - **Job outputs (cross-job).** A job may declare `outputs:` naming values
-    (drawn from its accumulated env) that latchet persists and exposes to any job
-    that `needs:` it — flat as injected env vars and namespaced via
-    `${{ needs.<job>.outputs.<name> }}` — passing *values* across the
+    (drawn from its accumulated env) that latchet persists and injects as env
+    vars into any job that `needs:` it — passing *values* across the
     per-job-isolated container boundary, the way `inherit:` passes *files*.
   - **Open design:** precedence of dynamic outputs vs a step's declared `env:`;
-    whether `if:` conditions read outputs only via the flat env form (`$name`,
-    which works today) or also accept `${{ }}`; masking (an output carrying a
-    secret value must still be redacted by `internal/mask`); recording outputs in
-    provenance; and line-format / size limits on the `$LATCHET_ENV` file.
+    masking (an output carrying a secret value must still be redacted by
+    `internal/mask`); recording outputs in provenance; and line-format / size
+    limits on the `$LATCHET_ENV` file.
 - ~~**Run location (`LATCHET_LOCATION`)**~~ — **shipped**
   (`globalconfig.Location`, `builtinenv.Location`). Machine-scoped location
   injected as the `LATCHET_LOCATION` built-in step var; resolution is the
