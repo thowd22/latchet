@@ -98,6 +98,31 @@ getting started; seeds below (signed OCI builds first):
   fan-in merges, exclude patterns, and persistence across runs.
 
 ### Workflow features
+- **Run location (`LATCHET_LOCATION`)** — let a run know whether it's executing
+  on the latchet server vs a developer workstation, so steps/jobs can be skipped
+  or gated by environment (e.g. only deploy from the server, skip slow
+  integration tests on a laptop).
+  - **Where the value lives — machine-scoped, not per-project.** A per-project
+    `latchet.yml` is byte-identical on every machine, so a `location:` *there*
+    can't differentiate them. The location belongs in the **machine-scoped
+    global config** (`latchet-ci.yml`,
+    `location: server | local | <any string>`), with a `LATCHET_LOCATION` env
+    var override (highest precedence) and a default of `local`. The latchet
+    server's global config sets `location: server`; a workstation leaves it
+    unset → `local`. `latchet watch` runs (which execute on the server) pick up
+    the server's value automatically.
+  - **Inject `LATCHET_LOCATION`** as a built-in step var (alongside the existing
+    `LATCHET_*`), overridable like the others — so `run:` scripts can branch on
+    it today: `if [ "$LATCHET_LOCATION" = server ]; then ./deploy; fi`. This
+    half is small (a `globalconfig` field + one `builtinenv` var) and could ship
+    on its own.
+  - **Conditional execution (follow-on, larger).** A `when:`/`if:` on jobs and
+    steps — e.g. `when: $LATCHET_LOCATION == server` — to *skip* a job/step
+    rather than gate inside a `run:`. latchet has no conditional execution
+    today; this is the bigger piece and would generalize beyond location (any
+    expression), pairing with `strategy.matrix` and `on:` gating. The DAG
+    skip-propagation machinery already exists, so a skipped-by-condition job
+    behaves like one whose dependency was skipped.
 - **`strategy.matrix`** — fan a job across combinations of variables (e.g.
   multiple language versions).
 - **`on` / triggers** — event-based triggering instead of "run the whole file
