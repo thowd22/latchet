@@ -169,6 +169,7 @@ prefix keeps them from colliding with workflow- or image-defined variables.
 | `LATCHET_GIT_SHA` | full commit SHA of HEAD |
 | `LATCHET_GIT_REF` | full ref, e.g. `refs/heads/main` or `refs/tags/v1.0.0` |
 | `LATCHET_LOCATION` | where the run is executing (e.g. `server` vs `local`); see [Run location](#run-location-and-conditional-steps) |
+| `LATCHET_ENV` | path to the step-output file; append `NAME=value` to it to set [step outputs](#step-outputs) |
 
 The `LATCHET_GIT_*` values are read from the host working directory via `git`
 (best-effort: empty strings when run outside a git checkout or with no `git`
@@ -415,6 +416,36 @@ Invalid `if:`/`elif:` expressions and malformed chains (an `elif`/`else` with no
 preceding `if`) are rejected at load time (exit code `2`). To skip an entire
 *job* by condition, gate the steps inside it — job-level conditionals are a
 [roadmap item](ROADMAP.md#workflow-features).
+
+## Step outputs
+
+A step can hand a value to **later steps in the same job** by appending
+`NAME=value` lines to the file at `$LATCHET_ENV` (a built-in path). After each
+step, latchet reads that file and injects the values as plain env vars into the
+remaining steps — no templating, just `$NAME`:
+
+```yaml
+steps:
+  - name: derive version
+    run: echo "VERSION=$(cat VERSION)" >> "$LATCHET_ENV"
+  - name: build
+    run: docker build -t app:$VERSION .   # VERSION is a normal env var here
+  - name: tag latest only on a release
+    if: $VERSION != ''                     # outputs work in conditions too
+    run: echo "tagging $VERSION"
+```
+
+- Outputs sit **above** workflow/job env but a later step's own `env:` still
+  wins; if two steps set the same name, the last one wins.
+- Each `NAME` must be a valid env-var name (`[A-Za-z_][A-Za-z0-9_]*`); values are
+  single-line. Lines without `=` or with an invalid name are ignored.
+- Outputs are scoped to **one job**. Passing values to *other* jobs (a job-level
+  `outputs:` consumed by `needs:` dependents) is a
+  [roadmap item](ROADMAP.md#workflow-features); today, cross-job sharing is by
+  file via `inherit:`.
+
+> latchet reserves the `/workspace/.latchet/` directory for this file; it is not
+> recorded as a provenance artifact.
 
 ## Sharing files between jobs
 

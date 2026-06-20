@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/thowd22/latchet/internal/builtinenv"
@@ -258,6 +260,47 @@ func stepShouldRun(step *config.Step, env map[string]string, chainTaken *bool) (
 	}
 }
 
+// readEnvFile parses a $LATCHET_ENV file into name->value. Each non-blank line
+// is `NAME=value` (value may contain `=`); lines without `=` or with an invalid
+// env-var name are ignored. A missing file yields no outputs and no error.
+func readEnvFile(path string) (map[string]string, error) {
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, line := range strings.Split(string(b), "\n") {
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		if k = strings.TrimSpace(k); validEnvName(k) {
+			out[k] = v
+		}
+	}
+	return out, nil
+}
+
+// validEnvName reports whether s is a POSIX-style env var name
+// ([A-Za-z_][A-Za-z0-9_]*).
+func validEnvName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r == '_', r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // secretValues returns just the values of a resolved-secrets map.
 func secretValues(m map[string]string) []string {
 	vals := make([]string, 0, len(m))
@@ -304,6 +347,19 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 	}
 	defer rt.Remove(container)
 
+	// Step outputs: a step appends NAME=value to $LATCHET_ENV (host-readable at
+	// jobDir/.latchet/env via the workspace mount); latchet merges them into
+	// later steps' env. Start clean so an inherited workspace's file can't leak
+	// a parent job's outputs.
+	metaDir := filepath.Join(jobDir, ".latchet")
+	_ = os.RemoveAll(metaDir)
+	if err := os.MkdirAll(metaDir, 0o777); err != nil {
+		return scheduler.Result{ID: job.ID}, err
+	}
+	_ = os.Chmod(metaDir, 0o777) // the container user may differ from latchet's
+	envFile := filepath.Join(metaDir, "env")
+	outputs := map[string]string{} // accumulated NAME=value step outputs
+
 	chainTaken := false // an if/elif chain has already taken a branch
 	for i, step := range job.Steps {
 		name := step.Name
@@ -311,9 +367,9 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 			name = fmt.Sprintf("step %d", i+1)
 		}
 
-		// Conditions evaluate against the step's full merged env, so they can
-		// read LATCHET_LOCATION, LATCHET_GIT_*, and any user/secret vars.
-		merged := mergeEnv(builtins, wf.Env, job.Env, secretEnv, step.Env)
+		// Conditions and the step itself see the full merged env, including any
+		// outputs set by earlier steps (above job/workflow env, below step env).
+		merged := mergeEnv(builtins, wf.Env, job.Env, secretEnv, outputs, step.Env)
 		run, skipReason, err := stepShouldRun(step, merged, &chainTaken)
 		if err != nil {
 			return scheduler.Result{ID: job.ID}, fmt.Errorf("job %q %s: %w", job.ID, name, err)
@@ -335,6 +391,14 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 			detail := fmt.Sprintf("%s exited %d", name, code)
 			log.JobEnd(out, job.ID, string(scheduler.StatusFailed), detail)
 			return scheduler.Result{ID: job.ID, Status: scheduler.StatusFailed, Detail: detail}, nil
+		}
+		// Pick up any NAME=value lines the step appended to $LATCHET_ENV.
+		if set, rerr := readEnvFile(envFile); rerr != nil {
+			fmt.Fprintf(out, "-- step: %s -> LATCHET_ENV unreadable: %v --\n", name, rerr)
+		} else {
+			for k, v := range set {
+				outputs[k] = v
+			}
 		}
 		log.StepEnd(out, name, true, time.Since(start))
 	}

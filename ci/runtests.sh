@@ -174,6 +174,15 @@ has "server: if branch runs (prod)"      "$CS" "BRANCH=prod"
 grep -qF "BRANCH=staging" "$CS" && bad "server: elif skipped" || ok "server: elif skipped"
 grep -qF "BRANCH=none" "$CS" && bad "server: else skipped" || ok "server: else skipped"
 
+echo "===== STEP OUTPUTS ====="
+OLOGS="$TMP/logs-output"
+LATCHET_LOG_DIR="$OLOGS" "$LATCHET" -file ci/output-demo.yml >/dev/null 2>&1
+OL="$OLOGS/latest/build.log"
+has "output passes to a later step"     "$OL" "using VERSION=1.2.3 ARTIFACT=app-abc"
+has "output usable in an if: condition" "$OL" "COND_SAW_OUTPUT=yes"
+grep -qF "SHOULD_NOT_RUN" "$OL" && bad "false output condition skipped" || ok "false output condition skipped"
+grep -qF '"build/.latchet' "$OLOGS/latest/provenance.json" && bad ".latchet kept out of provenance subjects" || ok ".latchet kept out of provenance subjects"
+
 echo "===== SECRET MASKING ====="
 SECRET="s3cr3t-$(echo abcXYZ | tr a-z A-Z)0123456789"   # fixed, distinctive value
 SLEN=${#SECRET}

@@ -145,31 +145,32 @@ getting started; seeds below (signed OCI builds first):
 ### Workflow features
 - **Step / job outputs** — let a step *set* a value that later steps (and
   downstream jobs) can read, without the `/workspace` file dance. The shared
-  prerequisite several items already lean on: **Functions'** `outputs:`,
+  prerequisite several items lean on: **Functions'** `outputs:`,
   **`strategy.matrix`** fan-in, the **Discover PRs/MRs** action, and job-level
   conditionals.
   **Outputs are plain env vars (the Jenkins model)** — consistent with how
   everything else in latchet works (`$VAR` in `run:`, in `if:` conditions, and
-  in injected `LATCHET_*` vars), and **no `${{ }}` templating** to introduce.
-  - **Set** by appending `NAME=value` to a built-in `$LATCHET_ENV` file — a
-    plain shell append, no ceremony. After the step finishes latchet reads that
-    file and merges the new vars into the env of every **subsequent step in the
-    same job**, so passing a value between steps is just:
+  in injected `LATCHET_*` vars), and **no `${{ }}` templating**.
+  - ~~**Within-job step outputs**~~ — **shipped** (`builtinenv.EnvFileVar`,
+    wired in `engine.runJob`). A step appends `NAME=value` to the built-in
+    `$LATCHET_ENV` file; latchet reads it host-side after each step (it lives
+    under the already-bind-mounted `/workspace/.latchet/`, so no in-container
+    agent) and merges the vars into every subsequent step's env — above
+    job/workflow env, below a step's own `env:`, last-writer-wins. Visible in
+    later steps' `run:` and `if:`. `.latchet/` is excluded from provenance
+    subjects.
 
     ```yaml
     steps:
       - run: echo "VERSION=$(cat VERSION)" >> "$LATCHET_ENV"
       - run: echo "building $VERSION"        # VERSION is now a normal env var
     ```
-  - **Feasible with the existing mount.** `$LATCHET_ENV` lives under the job's
-    `/workspace` (host-side `<jobDir>/…`), already bind-mounted, so latchet reads
-    it host-side after each `exec` — no in-container agent needed. The injected
-    outputs sit above job/workflow env (a later step's own `env:` still wins);
-    last-writer-wins when two steps set the same name.
-  - **Job outputs (cross-job).** A job may declare `outputs:` naming values
-    (drawn from its accumulated env) that latchet persists and injects as env
+  - **Job outputs (cross-job)** *(open)* — a job declares `outputs:` naming
+    values (from its accumulated env) that latchet persists and injects as env
     vars into any job that `needs:` it — passing *values* across the
     per-job-isolated container boundary, the way `inherit:` passes *files*.
+    Threads through the scheduler (a job's outputs stored on completion, read by
+    dependents).
   - **Open design:** precedence of dynamic outputs vs a step's declared `env:`;
     masking (an output carrying a secret value must still be redacted by
     `internal/mask`); recording outputs in provenance; and line-format / size
@@ -609,6 +610,9 @@ Done so far (cont.):
 14. ~~**Run location + step conditionals**~~ — shipped (`LATCHET_LOCATION`
     built-in via global config; `if`/`elif`/`else` on steps via `internal/cond`).
     Job-level conditionals remain open.
+15. ~~**Within-job step outputs**~~ — shipped; a step appends `NAME=value` to
+    `$LATCHET_ENV` and later steps see it as a normal env var. Cross-job
+    `outputs:` remain open.
 
 The supply-chain arc (Subsystems 1–4 + keyless release signing) is now
 complete. The only remaining pieces are genuinely out of scope or dependent on

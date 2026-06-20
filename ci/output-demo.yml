@@ -1,0 +1,19 @@
+name: output-demo
+# Exercises step outputs: a step appends NAME=value to $LATCHET_ENV; later
+# steps see them as normal env vars (in run: and in if: conditions).
+jobs:
+  build:
+    container: alpine:3.19
+    steps:
+      - name: set outputs
+        run: |
+          echo "VERSION=1.2.3" >> "$LATCHET_ENV"
+          echo "ARTIFACT=app-abc" >> "$LATCHET_ENV"
+      - name: use outputs
+        run: echo "using VERSION=$VERSION ARTIFACT=$ARTIFACT"
+      - name: gate on an output
+        if: $VERSION == 1.2.3
+        run: echo "COND_SAW_OUTPUT=yes"
+      - name: should not run
+        if: $VERSION == 9.9.9
+        run: echo "SHOULD_NOT_RUN"

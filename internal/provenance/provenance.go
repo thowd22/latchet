@@ -229,6 +229,11 @@ func HashTree(root, prefix string) ([]Subject, Stats, error) {
 			}
 			return err
 		}
+		// .latchet is latchet's per-job metadata dir (step-output env file); it
+		// is not a build artifact, so it never appears as a provenance subject.
+		if d.IsDir() && d.Name() == ".latchet" && filepath.Dir(p) == root {
+			return filepath.SkipDir
+		}
 		if !d.Type().IsRegular() { // skips dirs, symlinks, devices, sockets, fifos
 			return nil
 		}

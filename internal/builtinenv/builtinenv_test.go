@@ -43,6 +43,7 @@ func TestFor(t *testing.T) {
 		"LATCHET_GIT_SHA":    "deadbeef",
 		"LATCHET_GIT_REF":    "refs/heads/main",
 		"LATCHET_LOCATION":   "local",
+		"LATCHET_ENV":        "/workspace/.latchet/env",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("For() = %v, want %v", got, want)

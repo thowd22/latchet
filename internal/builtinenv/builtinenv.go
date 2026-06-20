@@ -37,7 +37,16 @@ const (
 	// "local"); resolved from the LATCHET_LOCATION env var (set by the global
 	// config), defaulting to "local".
 	LocationVar = "LATCHET_LOCATION"
+
+	// EnvFileVar names a file a step can append `NAME=value` lines to; latchet
+	// reads it after each step and merges the vars into later steps' env (step
+	// outputs). The path is fixed and host-readable via the workspace mount.
+	EnvFileVar = "LATCHET_ENV"
 )
+
+// EnvFilePath is the container-side path of the step-output file, under the
+// workspace mount so latchet can read it host-side.
+func EnvFilePath(workspace string) string { return workspace + "/.latchet/env" }
 
 // DefaultLocation is used when LATCHET_LOCATION is unset.
 const DefaultLocation = "local"
@@ -144,6 +153,7 @@ func For(runID, jobID, workspace string, git Git) map[string]string {
 		GitSHA:      git.SHA,
 		GitRef:      git.Ref,
 		LocationVar: Location(),
+		EnvFileVar:  EnvFilePath(workspace),
 	}
 }
 
