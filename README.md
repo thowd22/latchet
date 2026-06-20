@@ -104,6 +104,22 @@ jobs:
 - **Steps** run via `sh -c` with `set -e` prepended. Steps in a job share
   a `/workspace` directory; jobs do not share with each other by default
   (see `inherit:` below for one-parent file sharing).
+- **Multi-line `run:`** uses a YAML literal block (`|`). The whole block is one
+  shell script (one `sh -c`), so state persists *within* a step but not between
+  steps; with `set -e`, the first failing line aborts the step. It is POSIX
+  `sh`, not bash — avoid bash-isms.
+
+  ```yaml
+  steps:
+    - name: build and test
+      run: |
+        mkdir -p out && cd out        # cd persists within this step
+        go build -o app ../cmd/app
+        ./app --version
+        grep -q ok results.txt || echo "no results"   # tolerate non-zero with ||
+  ```
+- **Conditional steps** — a step may carry `if:` / `elif:` / `else: true`; see
+  [Run location and conditional steps](#run-location-and-conditional-steps).
 - A job may declare `inherit: <parent-id>` (which must also appear in
   `needs:`) to start with the parent's `/workspace` files copied in.
   Single parent only; named-artifact upload/download is not yet supported.
