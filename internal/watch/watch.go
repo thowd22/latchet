@@ -208,6 +208,7 @@ func fire(ctx context.Context, f Fire, opts Options) error {
 		File:        "latchet.yml",
 		MaxParallel: opts.MaxParallel,
 		DefaultEnv:  opts.DefaultEnv,
+		GitRef:      f.Ref, // so LATCHET_GIT_BRANCH/REF reflect the fired ref
 		Stdout:      opts.Stdout,
 		Stderr:      opts.Stderr,
 	})

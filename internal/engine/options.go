@@ -34,6 +34,12 @@ type Options struct {
 	// DefaultEnv holds machine-wide default env (from the global config),
 	// merged below the workflow's own env so a workflow always overrides it.
 	DefaultEnv map[string]string
+
+	// GitRef, when set, is the full refname (refs/heads/… or refs/tags/…) that
+	// triggered this run. It overrides the branch/tag the CWD git probe would
+	// report — needed by `latchet watch`, which checks out a detached commit
+	// the probe can't map back to a branch. Empty for ordinary runs.
+	GitRef string
 }
 
 // overlayDefaultEnv returns wf.Env with defaults merged underneath: a key set

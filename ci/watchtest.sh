@@ -20,7 +20,7 @@ jobs:
   hello:
     container: alpine:3.19
     steps:
-      - run: echo "WATCH_RAN sha=$LATCHET_GIT_SHA"
+      - run: echo "WATCH_RAN ref=$LATCHET_GIT_REF branch=$LATCHET_GIT_BRANCH sha=$LATCHET_GIT_SHA"
 YML
 git -C "$WORK" add -A; git -C "$WORK" commit -qm init; git -C "$WORK" push -q origin main
 
@@ -45,7 +45,7 @@ echo "=== pass 2: new commit on main -> fire ==="
 echo change >> "$WORK/file.txt"; git -C "$WORK" add -A; git -C "$WORK" commit -qm change; git -C "$WORK" push -q origin main
 O="$(run_watch)"
 echo "$O" | grep -q "refs/heads/main .* running latchet.yml" && ok "branch advance fires" || { bad "branch advance fires"; echo "$O"; }
-echo "$O" | grep -q "WATCH_RAN" && ok "fired run executed in a container" || { bad "fired run executed in a container"; echo "$O"; }
+echo "$O" | grep -q "WATCH_RAN ref=refs/heads/main branch=main " && ok "fired run sees branch/ref (LATCHET_GIT_BRANCH=main)" || { bad "fired run sees branch/ref"; echo "$O"; }
 echo "$O" | grep -q "1 run(s) fired, 0 failed" && ok "exactly one run fired" || { bad "exactly one run fired"; echo "$O"; }
 
 echo "=== pass 3: no change -> no fire ==="
@@ -56,7 +56,7 @@ echo "=== pass 4: new tag v1.0.0 -> fire ==="
 git -C "$WORK" tag v1.0.0; git -C "$WORK" push -q origin v1.0.0
 O="$(run_watch)"
 echo "$O" | grep -q "refs/tags/v1.0.0 .* running latchet.yml" && ok "new tag fires" || { bad "new tag fires"; echo "$O"; }
-echo "$O" | grep -q "WATCH_RAN" && ok "tag run executed in a container" || { bad "tag run executed in a container"; echo "$O"; }
+echo "$O" | grep -q "WATCH_RAN ref=refs/tags/v1.0.0 branch= " && ok "tag run sees tag ref (LATCHET_GIT_REF=refs/tags/v1.0.0, branch empty)" || { bad "tag run sees tag ref"; echo "$O"; }
 
 echo
 echo "=== watch result: $PASS passed, $FAIL failed ==="

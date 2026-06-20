@@ -213,10 +213,10 @@ getting started; seeds below (signed OCI builds first):
   `LATCHET_WATCH_STATE`); first pass for a repo/tag-pattern baselines without
   firing, so each change fires exactly once. No internal timer — schedule with
   cron (validated end-to-end on the VM via cron + a local bare repo). The
-  fire-decision logic is a pure, unit-tested function. **Still open:** passing
-  the trigger's known ref to the run so `LATCHET_GIT_BRANCH`/`REF` reflect it
-  (a watch fire checks out a detached SHA, so `LATCHET_GIT_SHA` is exact but
-  branch is empty; tags resolve via `describe`). Original design notes:
+  fire-decision logic is a pure, unit-tested function. A fired run gets the
+  trigger's ref via `engine.Options.GitRef` → `builtinenv.OverrideRef`, so
+  `LATCHET_GIT_BRANCH`/`REF` reflect the fired branch/tag even though the
+  checkout is a detached SHA. Original design notes:
   - **Branches and tags only.** No PR / merge-request triggers. Each
     entry in the global config is a git URL plus a list of branches
     and/or a list of tag patterns (e.g. exact tags like `v1.0.0`, or

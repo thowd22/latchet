@@ -77,3 +77,22 @@ func TestDeterministic(t *testing.T) {
 		}
 	}
 }
+
+func TestOverrideRef(t *testing.T) {
+	base := Git{Branch: "", Tag: "", SHA: "abc", URL: "u"}
+	// Branch ref: sets branch, clears tag, derives ref; SHA/URL untouched.
+	b := OverrideRef(base, "refs/heads/main")
+	if b.Branch != "main" || b.Tag != "" || b.Ref != "refs/heads/main" || b.SHA != "abc" || b.URL != "u" {
+		t.Errorf("branch override: %+v", b)
+	}
+	// Tag ref: sets tag, clears branch.
+	tg := OverrideRef(Git{Branch: "stale"}, "refs/tags/v1.0.0")
+	if tg.Tag != "v1.0.0" || tg.Branch != "" || tg.Ref != "refs/tags/v1.0.0" {
+		t.Errorf("tag override: %+v", tg)
+	}
+	// Unknown ref shape: unchanged.
+	u := OverrideRef(Git{Branch: "keep"}, "refs/pull/7/head")
+	if u.Branch != "keep" {
+		t.Errorf("unknown ref should not change git: %+v", u)
+	}
+}

@@ -79,6 +79,26 @@ func Deterministic(g Git) map[string]string {
 	}
 }
 
+// OverrideRef returns g with its Branch/Tag/Ref set from a known full refname
+// (refs/heads/<b> or refs/tags/<t>). Used when the caller knows the ref a
+// detached checkout can't report — e.g. `latchet watch`, which checks out a
+// commit by SHA. SHA/URL/CommitEpoch are left as probed. An unrecognized ref
+// shape leaves g unchanged.
+func OverrideRef(g Git, ref string) Git {
+	switch {
+	case strings.HasPrefix(ref, "refs/heads/"):
+		g.Branch = strings.TrimPrefix(ref, "refs/heads/")
+		g.Tag = ""
+	case strings.HasPrefix(ref, "refs/tags/"):
+		g.Tag = strings.TrimPrefix(ref, "refs/tags/")
+		g.Branch = ""
+	default:
+		return g
+	}
+	g.Ref = DeriveRef(g.Branch, g.Tag)
+	return g
+}
+
 // DeriveRef builds the full ref string from a branch or tag name, preferring a
 // branch when both are present. Returns "" when neither is known (e.g. a
 // detached HEAD at an untagged commit).

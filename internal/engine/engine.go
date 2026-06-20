@@ -83,6 +83,11 @@ func Run(opts Options) int {
 	// Resolve source-control facts once per run (run-level, host CWD) and inject
 	// them into every job as LATCHET_GIT_* built-in env vars.
 	git := builtinenv.ResolveGit(context.Background())
+	if opts.GitRef != "" {
+		// A trigger (e.g. `latchet watch`) knows the ref a detached checkout
+		// can't report; let it set the branch/tag/ref.
+		git = builtinenv.OverrideRef(git, opts.GitRef)
+	}
 	// SOURCE_DATE_EPOCH (used by the determinism helpers) falls back to the
 	// run-start time when HEAD's commit time is unavailable. Fixed once per run
 	// so every job sees the same value.
