@@ -22,7 +22,7 @@ import (
 // best-effort: any failure is reported as a warning and never changes the
 // run's exit code. Must be called after the run completes but before the
 // workspace is cleaned, so job artifacts are still on disk to hash.
-func emitProvenance(ctx context.Context, ws *workspace.Run, ls *logstore.Run, wf *config.Workflow, opts Options, git builtinenv.Git, images *imageCache, maxParallel int, started, finished time.Time, out, warn io.Writer) {
+func emitProvenance(ctx context.Context, ws *workspace.Run, ls *logstore.Run, wf *config.Workflow, opts Options, git builtinenv.Git, images *imageCache, jobOuts *jobOutputs, maxParallel int, started, finished time.Time, out, warn io.Writer) {
 	wfBytes, err := os.ReadFile(opts.File)
 	if err != nil {
 		fmt.Fprintf(warn, "latchet: provenance skipped: %v\n", err)
@@ -58,11 +58,12 @@ func emitProvenance(ctx context.Context, ws *workspace.Run, ls *logstore.Run, wf
 		builtins := jobBuiltins(ws.ID, job, wf, git)
 		secretEnv := resolveSecrets(wf, job)
 		secrets := secretValues(secretEnv)
+		needsEnv := jobOuts.needsEnv([]string(job.Needs))
 		steps := make([]provenance.StepParams, 0, len(job.Steps))
 		for _, st := range job.Steps {
-			// Mirror the runtime env merge (incl. injected secrets), then redact
-			// any value (or run string) carrying a secret before recording.
-			merged := mergeEnv(builtins, wf.Env, job.Env, secretEnv, st.Env)
+			// Mirror the runtime env merge (incl. needs outputs + secrets), then
+			// redact any value (or run string) carrying a secret before recording.
+			merged := mergeEnv(builtins, needsEnv, wf.Env, job.Env, secretEnv, st.Env)
 			steps = append(steps, provenance.StepParams{
 				Name: st.Name,
 				Run:  provenance.RedactString(st.Run, secrets),

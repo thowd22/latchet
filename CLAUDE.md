@@ -92,7 +92,8 @@ Step conditionals: `if:`/`elif:`/`else:` on steps, evaluated by `internal/cond`
 (`$VAR`, `==`/`!=`/`&&`/`||`/`!`, parens) against the step's merged env.
 Step outputs: a step appends `NAME=value` to `$LATCHET_ENV`
 (`builtinenv.EnvFileVar`, host-read from `jobDir/.latchet/env`); `engine.runJob`
-merges them into later steps' env. Within-job only so far.
+merges them into later steps' env. A job's declared `outputs:` are stored
+run-wide (`jobOutputs`) and injected as env into `needs:`-dependents (cross-job).
 
 Each run emits `<logdir>/provenance.json` (SLSA v1.0, `internal/provenance`),
 optionally signed via cosign (`internal/signer`) when `LATCHET_COSIGN_KEY` is

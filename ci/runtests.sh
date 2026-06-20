@@ -182,6 +182,13 @@ has "output passes to a later step"     "$OL" "using VERSION=1.2.3 ARTIFACT=app-
 has "output usable in an if: condition" "$OL" "COND_SAW_OUTPUT=yes"
 grep -qF "SHOULD_NOT_RUN" "$OL" && bad "false output condition skipped" || ok "false output condition skipped"
 grep -qF '"build/.latchet' "$OLOGS/latest/provenance.json" && bad ".latchet kept out of provenance subjects" || ok ".latchet kept out of provenance subjects"
+# cross-job: producer outputs: -> consumer needs:
+XLOGS="$TMP/logs-crossjob"
+LATCHET_LOG_DIR="$XLOGS" "$LATCHET" -file ci/crossjob-demo.yml >/dev/null 2>&1
+XC="$XLOGS/latest/consumer.log"
+has "declared outputs reach the dependent job" "$XC" "consumer VERSION=2.0.0 ARTIFACT=app-xyz"
+has "undeclared value does not cross"          "$XC" "INTERNAL=[]"
+grep -qF "not-exported" "$XC" && bad "undeclared output value did not leak" || ok "undeclared output value did not leak"
 
 echo "===== SECRET MASKING ====="
 SECRET="s3cr3t-$(echo abcXYZ | tr a-z A-Z)0123456789"   # fixed, distinctive value

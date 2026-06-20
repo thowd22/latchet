@@ -202,10 +202,11 @@ func Verify(vo VerifyOptions) int {
 	// SOURCE_DATE_EPOCH is still provided in case the workflow is deterministic.
 	git := builtinenv.Git{CommitEpoch: strconv.FormatInt(time.Now().Unix(), 10)}
 
+	jobOuts := newJobOutputs()
 	results, infraErr := scheduler.Run(context.Background(), g, scheduler.Options{
 		MaxParallel: maxParallel,
 		RunJob: func(ctx context.Context, jobID string) (scheduler.Result, error) {
-			return runOne(ctx, r, ws, ls, wf, jobID, images, out, maxParallel, git)
+			return runOne(ctx, r, ws, ls, wf, jobID, images, out, maxParallel, git, jobOuts)
 		},
 		OnSkip: func(jobID, reason string) { log.JobSkip(out, jobID, reason) },
 	})

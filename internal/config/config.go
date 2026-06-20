@@ -42,6 +42,7 @@ type Job struct {
 	Steps         []*Step           `yaml:"steps"`
 	Deterministic bool              `yaml:"deterministic"` // apply determinism helpers to this job
 	Secrets       []string          `yaml:"secrets"`       // host env var names injected + masked for this job
+	Outputs       []string          `yaml:"outputs"`       // env var names (set via $LATCHET_ENV) exported to needs-dependents
 }
 
 // Step is one shell command run inside its job's container. A step may carry a
@@ -66,6 +67,23 @@ const (
 	stepElif
 	stepElse
 )
+
+// validEnvName reports whether s is a POSIX-style env var name
+// ([A-Za-z_][A-Za-z0-9_]*).
+func validEnvName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r == '_', r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 func (s *Step) kind() stepKind {
 	switch {
@@ -164,6 +182,11 @@ func (wf *Workflow) Validate() error {
 		}
 		if len(job.Steps) == 0 {
 			errs = append(errs, fmt.Sprintf("job %q: has no steps", id))
+		}
+		for _, name := range job.Outputs {
+			if !validEnvName(name) {
+				errs = append(errs, fmt.Sprintf("job %q: output %q is not a valid env var name", id, name))
+			}
 		}
 		chainOpen := false // a preceding if/elif a following elif/else can attach to
 		for i, step := range job.Steps {

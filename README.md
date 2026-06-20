@@ -439,13 +439,42 @@ steps:
   wins; if two steps set the same name, the last one wins.
 - Each `NAME` must be a valid env-var name (`[A-Za-z_][A-Za-z0-9_]*`); values are
   single-line. Lines without `=` or with an invalid name are ignored.
-- Outputs are scoped to **one job**. Passing values to *other* jobs (a job-level
-  `outputs:` consumed by `needs:` dependents) is a
-  [roadmap item](ROADMAP.md#workflow-features); today, cross-job sharing is by
-  file via `inherit:`.
+- Each `NAME` must be a valid env-var name (`[A-Za-z_][A-Za-z0-9_]*`); values are
+  single-line. Lines without `=` or with an invalid name are ignored.
 
-> latchet reserves the `/workspace/.latchet/` directory for this file; it is not
-> recorded as a provenance artifact.
+### Passing outputs to other jobs
+
+A job can export selected outputs to the jobs that depend on it. Declare the
+names under `outputs:`; latchet injects those values as env vars into every job
+that lists this one in `needs:`:
+
+```yaml
+jobs:
+  build:
+    container: golang:1.22
+    outputs: [VERSION]                      # only these cross to dependents
+    steps:
+      - run: |
+          git clone --depth 1 "$LATCHET_GIT_URL" .
+          echo "VERSION=$(git describe --tags --always)" >> "$LATCHET_ENV"
+  release:
+    container: alpine:3.19
+    needs: build
+    steps:
+      - run: echo "releasing $VERSION"      # from build's outputs
+```
+
+- Only names listed in `outputs:` cross to dependents — other values a step set
+  stay within the producing job.
+- A dependent reads them as plain env vars (above workflow/job env, below its
+  own step `env:`); if two dependencies export the same name, the later one in
+  `needs:` wins.
+- A declared output that was never set crosses as an empty string (with a
+  warning in the producer's log).
+- This passes *values*; to pass *files* between jobs use `inherit:` (see below).
+
+> latchet reserves the `/workspace/.latchet/` directory for the output file; it
+> is not recorded as a provenance artifact.
 
 ## Sharing files between jobs
 

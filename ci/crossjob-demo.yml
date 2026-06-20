@@ -1,0 +1,17 @@
+name: crossjob-demo
+# producer declares outputs:; consumer (needs: producer) sees them as env vars.
+# A value set but NOT declared in outputs: does not cross to the consumer.
+jobs:
+  producer:
+    container: alpine:3.19
+    outputs: [VERSION, ARTIFACT]
+    steps:
+      - run: |
+          echo "VERSION=2.0.0" >> "$LATCHET_ENV"
+          echo "ARTIFACT=app-xyz" >> "$LATCHET_ENV"
+          echo "INTERNAL=not-exported" >> "$LATCHET_ENV"
+  consumer:
+    container: alpine:3.19
+    needs: producer
+    steps:
+      - run: echo "consumer VERSION=$VERSION ARTIFACT=$ARTIFACT INTERNAL=[$INTERNAL]"

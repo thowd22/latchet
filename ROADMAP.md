@@ -165,12 +165,12 @@ getting started; seeds below (signed OCI builds first):
       - run: echo "VERSION=$(cat VERSION)" >> "$LATCHET_ENV"
       - run: echo "building $VERSION"        # VERSION is now a normal env var
     ```
-  - **Job outputs (cross-job)** *(open)* — a job declares `outputs:` naming
-    values (from its accumulated env) that latchet persists and injects as env
-    vars into any job that `needs:` it — passing *values* across the
-    per-job-isolated container boundary, the way `inherit:` passes *files*.
-    Threads through the scheduler (a job's outputs stored on completion, read by
-    dependents).
+  - ~~**Job outputs (cross-job)**~~ — **shipped**. A job declares `outputs:`
+    naming env vars (set via `$LATCHET_ENV`) that latchet stores on the job's
+    success and injects into any job that `needs:` it — passing *values* across
+    the per-job-isolated container boundary, the way `inherit:` passes *files*.
+    Threaded through the scheduler via a run-wide outputs store; only declared
+    names cross.
   - **Open design:** precedence of dynamic outputs vs a step's declared `env:`;
     masking (an output carrying a secret value must still be redacted by
     `internal/mask`); recording outputs in provenance; and line-format / size
@@ -610,9 +610,9 @@ Done so far (cont.):
 14. ~~**Run location + step conditionals**~~ — shipped (`LATCHET_LOCATION`
     built-in via global config; `if`/`elif`/`else` on steps via `internal/cond`).
     Job-level conditionals remain open.
-15. ~~**Within-job step outputs**~~ — shipped; a step appends `NAME=value` to
-    `$LATCHET_ENV` and later steps see it as a normal env var. Cross-job
-    `outputs:` remain open.
+15. ~~**Step / job outputs**~~ — shipped; within-job (a step appends
+    `NAME=value` to `$LATCHET_ENV`, later steps see it as a normal env var) and
+    cross-job (a job's declared `outputs:` injected into `needs:` dependents).
 
 The supply-chain arc (Subsystems 1–4 + keyless release signing) is now
 complete. The only remaining pieces are genuinely out of scope or dependent on

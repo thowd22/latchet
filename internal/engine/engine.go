@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/thowd22/latchet/internal/builtinenv"
@@ -98,11 +99,12 @@ func Run(opts Options) int {
 		git.CommitEpoch = strconv.FormatInt(time.Now().Unix(), 10)
 	}
 
+	jobOuts := newJobOutputs()
 	started := time.Now()
 	results, infraErr := scheduler.Run(context.Background(), g, scheduler.Options{
 		MaxParallel: maxParallel,
 		RunJob: func(ctx context.Context, jobID string) (scheduler.Result, error) {
-			return runOne(ctx, rt, ws, ls, wf, jobID, images, opts.Stdout, maxParallel, git)
+			return runOne(ctx, rt, ws, ls, wf, jobID, images, opts.Stdout, maxParallel, git, jobOuts)
 		},
 		OnSkip: func(jobID, reason string) {
 			log.JobSkip(opts.Stdout, jobID, reason)
@@ -132,7 +134,7 @@ func Run(opts Options) int {
 	}
 
 	// Emit SLSA provenance before cleanup, while job artifacts still exist.
-	emitProvenance(context.Background(), ws, ls, wf, opts, git, images, maxParallel, started, finished, opts.Stdout, opts.Stderr)
+	emitProvenance(context.Background(), ws, ls, wf, opts, git, images, jobOuts, maxParallel, started, finished, opts.Stdout, opts.Stderr)
 
 	if kept := ws.Cleanup(exit != ExitSuccess); kept != "" {
 		fmt.Fprintf(opts.Stdout, "\nworkspace kept at %s\n", kept)
@@ -140,12 +142,43 @@ func Run(opts Options) int {
 	return exit
 }
 
+// jobOutputs is the run-wide store of each job's exported outputs, read by
+// dependents. The scheduler runs a job only after its needs have completed, so
+// a dependent always sees its needs' outputs; the mutex guards concurrent
+// writes by jobs running in the same wave.
+type jobOutputs struct {
+	mu sync.Mutex
+	m  map[string]map[string]string
+}
+
+func newJobOutputs() *jobOutputs { return &jobOutputs{m: map[string]map[string]string{}} }
+
+func (j *jobOutputs) set(id string, out map[string]string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.m[id] = out
+}
+
+// needsEnv merges the outputs of the given dependency jobs into one env map
+// (later needs win on a name clash).
+func (j *jobOutputs) needsEnv(needs []string) map[string]string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	out := map[string]string{}
+	for _, n := range needs {
+		for k, v := range j.m[n] {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 // runOne wraps runJob with the per-job log file setup. The log file always
 // records the full output; for maxParallel == 1 it is teed to stdout so the
 // user sees streaming output (matching v1's UX). For maxParallel > 1, stdout
 // gets only terse begin/end markers, since interleaving live step output
 // from concurrent jobs is unreadable.
-func runOne(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, ls *logstore.Run, wf *config.Workflow, jobID string, images *imageCache, stdout io.Writer, maxParallel int, git builtinenv.Git) (scheduler.Result, error) {
+func runOne(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, ls *logstore.Run, wf *config.Workflow, jobID string, images *imageCache, stdout io.Writer, maxParallel int, git builtinenv.Git, outs *jobOutputs) (scheduler.Result, error) {
 	logFile, logPath, err := ls.OpenJob(jobID)
 	if err != nil {
 		return scheduler.Result{ID: jobID}, err
@@ -163,8 +196,14 @@ func runOne(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, ls *log
 	// in serial mode, stdout). Passthrough when the job declares no secrets.
 	mw := mask.New(stepW, secretValues(resolveSecrets(wf, wf.Jobs[jobID])))
 
-	res, err := runJob(ctx, rt, ws, wf, wf.Jobs[jobID], images, mw, git)
+	// Outputs declared by this job's dependencies are injected as env vars.
+	needsEnv := outs.needsEnv([]string(wf.Jobs[jobID].Needs))
+
+	res, exported, err := runJob(ctx, rt, ws, wf, wf.Jobs[jobID], images, mw, git, needsEnv)
 	mw.Close() // flush any masked tail held back across writes
+	if err == nil && res.Status == scheduler.StatusSuccess {
+		outs.set(jobID, exported)
+	}
 	if maxParallel > 1 {
 		switch {
 		case err != nil:
@@ -314,7 +353,7 @@ func secretValues(m map[string]string) []string {
 // signals an infrastructure failure that the scheduler should treat as
 // aborting; a step exiting non-zero is reported as a scheduler.Result with
 // StatusFailed.
-func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *config.Workflow, job *config.Job, images *imageCache, out io.Writer, git builtinenv.Git) (scheduler.Result, error) {
+func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *config.Workflow, job *config.Job, images *imageCache, out io.Writer, git builtinenv.Git, needsEnv map[string]string) (scheduler.Result, map[string]string, error) {
 	log.JobStart(out, job.ID)
 
 	// Built-in vars are identical for every step in the job and form the
@@ -328,22 +367,22 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 
 	jobDir, err := ws.JobDir(job.ID)
 	if err != nil {
-		return scheduler.Result{ID: job.ID}, err
+		return scheduler.Result{ID: job.ID}, nil, err
 	}
 
 	if job.Inherit != "" {
 		if err := ws.Seed(job.ID, job.Inherit); err != nil {
-			return scheduler.Result{ID: job.ID}, err
+			return scheduler.Result{ID: job.ID}, nil, err
 		}
 	}
 
 	if err := images.Ensure(ctx, rt, job.Container, out); err != nil {
-		return scheduler.Result{ID: job.ID}, err
+		return scheduler.Result{ID: job.ID}, nil, err
 	}
 
 	container := fmt.Sprintf("latchet-%s-%s", ws.ID, job.ID)
 	if err := rt.Create(ctx, container, job.Container, jobDir); err != nil {
-		return scheduler.Result{ID: job.ID}, err
+		return scheduler.Result{ID: job.ID}, nil, err
 	}
 	defer rt.Remove(container)
 
@@ -354,7 +393,7 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 	metaDir := filepath.Join(jobDir, ".latchet")
 	_ = os.RemoveAll(metaDir)
 	if err := os.MkdirAll(metaDir, 0o777); err != nil {
-		return scheduler.Result{ID: job.ID}, err
+		return scheduler.Result{ID: job.ID}, nil, err
 	}
 	_ = os.Chmod(metaDir, 0o777) // the container user may differ from latchet's
 	envFile := filepath.Join(metaDir, "env")
@@ -367,12 +406,13 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 			name = fmt.Sprintf("step %d", i+1)
 		}
 
-		// Conditions and the step itself see the full merged env, including any
-		// outputs set by earlier steps (above job/workflow env, below step env).
-		merged := mergeEnv(builtins, wf.Env, job.Env, secretEnv, outputs, step.Env)
+		// Conditions and the step itself see the full merged env: built-ins,
+		// dependency (needs) outputs, workflow/job env, secrets, this job's own
+		// accumulated step outputs, then the step's own env (highest).
+		merged := mergeEnv(builtins, needsEnv, wf.Env, job.Env, secretEnv, outputs, step.Env)
 		run, skipReason, err := stepShouldRun(step, merged, &chainTaken)
 		if err != nil {
-			return scheduler.Result{ID: job.ID}, fmt.Errorf("job %q %s: %w", job.ID, name, err)
+			return scheduler.Result{ID: job.ID}, nil, fmt.Errorf("job %q %s: %w", job.ID, name, err)
 		}
 		if !run {
 			log.StepSkip(out, name, skipReason)
@@ -384,13 +424,13 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 		start := time.Now()
 		code, err := rt.Exec(ctx, container, env, step.Run, out, out)
 		if err != nil {
-			return scheduler.Result{ID: job.ID}, err
+			return scheduler.Result{ID: job.ID}, nil, err
 		}
 		if code != 0 {
 			log.StepEnd(out, name, false, time.Since(start))
 			detail := fmt.Sprintf("%s exited %d", name, code)
 			log.JobEnd(out, job.ID, string(scheduler.StatusFailed), detail)
-			return scheduler.Result{ID: job.ID, Status: scheduler.StatusFailed, Detail: detail}, nil
+			return scheduler.Result{ID: job.ID, Status: scheduler.StatusFailed, Detail: detail}, nil, nil
 		}
 		// Pick up any NAME=value lines the step appended to $LATCHET_ENV.
 		if set, rerr := readEnvFile(envFile); rerr != nil {
@@ -404,5 +444,23 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 	}
 
 	log.JobEnd(out, job.ID, string(scheduler.StatusSuccess), "")
-	return scheduler.Result{ID: job.ID, Status: scheduler.StatusSuccess}, nil
+	return scheduler.Result{ID: job.ID, Status: scheduler.StatusSuccess}, exportedOutputs(job, outputs, out), nil
+}
+
+// exportedOutputs selects the job's declared outputs from its accumulated step
+// outputs. A declared name that was never set is exported as "" with a warning,
+// so dependents see a stable key set.
+func exportedOutputs(job *config.Job, outputs map[string]string, warn io.Writer) map[string]string {
+	if len(job.Outputs) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(job.Outputs))
+	for _, name := range job.Outputs {
+		v, ok := outputs[name]
+		if !ok {
+			fmt.Fprintf(warn, "-- job %s: declared output %q was never set --\n", job.ID, name)
+		}
+		out[name] = v
+	}
+	return out
 }
