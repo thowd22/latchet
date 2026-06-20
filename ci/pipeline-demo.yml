@@ -1,0 +1,57 @@
+name: ci-pipeline
+# A realistic end-to-end pipeline:
+#   build  -> produce an artifact + a VERSION output
+#   test   -> matrix (unit/integration), inherits build's workspace
+#   publish-> gated to the server, calls a local `release` function
+#   done   -> calls a GLOBAL `notify` function (from latchet-ci.yml)
+functions:
+  release:                          # local function
+    inputs:
+      version:  {required: true}
+      registry: {default: registry.local}
+    steps:
+      - run: echo "[release] pushing app:$version to $registry"
+      - run: echo "PUBLISHED=$registry/app:$version" >> "$LATCHET_ENV"
+jobs:
+  build:
+    container: alpine:3.19
+    outputs: [VERSION]
+    steps:
+      - run: |
+          mkdir -p dist
+          echo "the app binary" > dist/app
+          echo "VERSION=1.0.0-$LATCHET_GIT_BRANCH" >> "$LATCHET_ENV"
+      - run: echo "built dist/app at version $VERSION"
+
+  test:
+    container: alpine:3.19
+    needs: build
+    inherit: build                  # reuse build's /workspace (the artifact)
+    strategy:
+      matrix:
+        suite: [unit, integration]
+    steps:
+      - run: test -f dist/app && echo "[$suite] artifact present"
+      - if: $suite == integration
+        run: echo "[integration] running slow checks"
+      - else: true
+        run: echo "[unit] running fast checks"
+
+  publish:
+    container: alpine:3.19
+    needs: [build, test]            # waits for build + every test combo
+    if: $LATCHET_LOCATION == server # only publish from the server
+    outputs: [PUBLISHED]
+    steps:
+      - call: release               # local function, with build's VERSION
+        with:
+          version: $VERSION
+      - run: echo "published as $PUBLISHED"
+
+  done:
+    container: alpine:3.19
+    needs: publish
+    steps:
+      - call: notify                # global function from latchet-ci.yml
+        with:
+          stage: ci-pipeline

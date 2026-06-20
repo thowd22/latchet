@@ -660,6 +660,24 @@ appeared or moved, it clones that commit and runs the repo's `latchet.yml`.
 - **No implicit checkout** — clone your repo yourself (see [Checking out
   your code](#checking-out-your-code)).
 
+## Examples
+
+The [`ci/`](ci/) directory holds runnable example workflows, each exercising a
+feature:
+
+- [`pipeline-demo.yml`](ci/pipeline-demo.yml) — a full **build → test matrix →
+  publish → notify** pipeline tying most features together (outputs,
+  `inherit:`, matrix, conditionals, local + global functions)
+- [`combined-demo.yml`](ci/combined-demo.yml) — matrix + function + step/job
+  conditionals + cross-job outputs in one workflow
+- [`matrix-demo.yml`](ci/matrix-demo.yml), [`fn-demo.yml`](ci/fn-demo.yml),
+  [`cond-demo.yml`](ci/cond-demo.yml), [`jobcond-demo.yml`](ci/jobcond-demo.yml),
+  [`output-demo.yml`](ci/output-demo.yml),
+  [`crossjob-demo.yml`](ci/crossjob-demo.yml),
+  [`secret-demo.yml`](ci/secret-demo.yml) — single-feature demos
+- [`runtests.sh`](ci/runtests.sh) — the feature test harness (run on a host with
+  a container runtime)
+
 ## Documentation
 
 - [`docs/design.md`](docs/design.md) — architecture and design rationale
