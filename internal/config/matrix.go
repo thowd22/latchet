@@ -32,6 +32,7 @@ func ExpandMatrix(wf *Workflow) *Workflow {
 		Env:           wf.Env,
 		Deterministic: wf.Deterministic,
 		Secrets:       wf.Secrets,
+		Functions:     wf.Functions,
 		Jobs:          make(map[string]*Job, len(wf.Jobs)),
 	}
 
@@ -136,6 +137,10 @@ func comboLabel(combo map[string]string) string {
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
 }
+
+// ExpandVars replaces $NAME and ${NAME} in s with vars[NAME] (names absent from
+// vars are left untouched). Exported for reuse expanding function `with:` inputs.
+func ExpandVars(s string, vars map[string]string) string { return expandVars(s, vars) }
 
 // expandVars replaces $NAME and ${NAME} in s with vars[NAME], for names present
 // in vars (others are left untouched). Used to vary the container image by

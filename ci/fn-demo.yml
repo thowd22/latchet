@@ -1,0 +1,21 @@
+name: fn-demo
+# A local function called with inputs; defaults; a with-value that references
+# the caller's env; and a function step that sets a step output.
+functions:
+  tag:
+    inputs:
+      name:   {required: true}
+      suffix: {default: stable}
+    steps:
+      - run: echo "TAG name=$name suffix=$suffix loc=$LATCHET_LOCATION"
+      - run: echo "TAGGED=$name-$suffix" >> "$LATCHET_ENV"
+jobs:
+  build:
+    container: alpine:3.19
+    steps:
+      - run: echo "start"
+      - call: tag
+        with:
+          name: app
+          suffix: $LATCHET_LOCATION   # expands to the caller's location
+      - run: echo "after call TAGGED=$TAGGED"   # output set inside the function

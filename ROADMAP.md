@@ -12,51 +12,34 @@ pass before implementation.
   The largest item: needs action fetching/resolution and a substantially bigger
   runner. This is what would make latchet workflows reusable rather than purely
   inline.
-- **Functions (reusable parameterized steps)** — named, parameterized units of
-  workflow logic, *called* by name with inputs (and, eventually, outputs) like a
-  function. Think GitHub Actions **composite actions**, but defined **inline**
-  rather than fetched — the local-definition complement to `uses` above.
-  - **Two scopes.**
-    - **Global functions** live in the machine-wide `latchet-ci.yml` under a
-      `functions:` map and are available as helpers in *any* job on that
-      machine — a shared local library, no fetching, fully trusted since the
-      operator owns the file.
-    - **Local functions** live in a `latchet.yml`'s own `functions:` map and
-      are callable anywhere *in that file*. This is the parameterized successor
-      to YAML anchors: an anchor (`&x`/`*x`) splices a YAML node verbatim at
-      parse time with no inputs, whereas a function takes named inputs and can
-      behave differently per call. A local function shadows a global one of the
-      same name.
-  - **A function is a named sequence of steps** with declared `inputs:`
-    (optional defaults) and `outputs:`. Calling it **inlines its steps** into
-    the calling job, running in that job's container so it shares the image and
-    `/workspace`. Inputs are exposed to the function's steps as env vars;
-    unsupplied inputs fall back to their defaults.
-  - **Call site.** A step invokes a function by name with arguments, e.g.
-    `- call: notify-slack` + `with: {message: "deployed $LATCHET_GIT_SHA"}`.
-    Calls compose with ordinary steps and with `if:`/`elif:`/`else:`.
+- ~~**Functions (reusable parameterized steps)**~~ — **shipped**
+  (`config.Function`, `config.ExpandCalls`). Named, parameterized step
+  sequences `call:`-ed by name — composite actions, defined **inline** rather
+  than fetched (the local complement to `uses`).
+  - **Two scopes, shipped.** Global functions in the machine-wide
+    `latchet-ci.yml` (`internal/globalconfig`), usable in any job; local
+    functions in a workflow's own `functions:`. A local function shadows a
+    global one of the same name (`MergeFunctions`). The parameterized successor
+    to YAML anchors (an anchor splices verbatim with no inputs; a function takes
+    named inputs).
+  - **Mechanics.** A `call:` step (with `with:` inputs) inlines the function's
+    steps into the caller's job/container; inputs are env vars, and `with:`
+    values / `default:`s are `$VAR`-expanded against the job's static env. A
+    function "returns" by writing to `$LATCHET_ENV` (step outputs). Validated at
+    load: unknown function, missing required input, undeclared `with:` key,
+    `run`+`call` together, `if:` on a call, and nested calls are all rejected.
 
     ```yaml
-    # latchet-ci.yml (global) or a latchet.yml (local)
     functions:
       notify-slack:
-        inputs:
-          message: {required: true}
-          channel:  {default: "#ci"}
+        inputs: {message: {required: true}, channel: {default: "#ci"}}
         steps:
           - run: curl -s -X POST "$SLACK_WEBHOOK" -d "{\"channel\":\"$channel\",\"text\":\"$message\"}"
     ```
-  - **Outputs depend on the [Step / job outputs](#workflow-features) item.** A
-    first cut can ship **inputs-only** functions (parameterized step reuse),
-    with named `outputs:` landing once step outputs exist; until then a
-    function "returns" by writing to `/workspace`.
-  - **Open design:** input typing/required-vs-default and validation; whether a
-    function may declare its own `container:` or always runs in the caller's;
-    nesting depth + recursion/cycle detection; strict parsing of the
-    `functions:` map and how the global+local namespaces merge; and whether
-    `uses` (remote) and functions (local) should share **one** invocation
-    runner — so a `uses` action is just a *fetched* function (`call:`/`uses:`
-    unified at the call site).
+  - **Still open:** declared function-level `outputs:` (today outputs flow
+    implicitly via `$LATCHET_ENV`); a function declaring its own `container:`;
+    `if:` on a call step; and unifying `uses` (remote) + functions (local) under
+    one invocation runner so a `uses` action is a *fetched* function.
 
 #### Prebuilt actions / build steps
 

@@ -93,6 +93,9 @@ Conditionals: `if:`/`elif:`/`else:` on steps and a single `if:` on jobs
 (`$VAR`, `==`/`!=`/`&&`/`||`/`!`, parens) against the merged env.
 `strategy.matrix` (`config.ExpandMatrix`): a job is fanned into one per combo
 before the DAG; matrix vars set as env + `$`-expanded into `container:`.
+Functions (`config.Function`, `config.ExpandCalls`): `functions:` in workflow
+(local) or `latchet-ci.yml` (global, local shadows global via `MergeFunctions`);
+a `call:` step with `with:` inputs inlines the function's steps into the job.
 Step outputs: a step appends `NAME=value` to `$LATCHET_ENV`
 (`builtinenv.EnvFileVar`, host-read from `jobDir/.latchet/env`); `engine.runJob`
 merges them into later steps' env. A job's declared `outputs:` are stored

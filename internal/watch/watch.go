@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/thowd22/latchet/internal/config"
 	"github.com/thowd22/latchet/internal/engine"
 	"github.com/thowd22/latchet/internal/globalconfig"
 )
@@ -45,6 +46,7 @@ type Fire struct {
 type Options struct {
 	MaxParallel int
 	DefaultEnv  map[string]string
+	Functions   map[string]*config.Function
 	Stdout      io.Writer
 	Stderr      io.Writer
 }
@@ -208,6 +210,7 @@ func fire(ctx context.Context, f Fire, opts Options) error {
 		File:        "latchet.yml",
 		MaxParallel: opts.MaxParallel,
 		DefaultEnv:  opts.DefaultEnv,
+		Functions:   opts.Functions,
 		GitRef:      f.Ref, // so LATCHET_GIT_BRANCH/REF reflect the fired ref
 		Stdout:      opts.Stdout,
 		Stderr:      opts.Stderr,

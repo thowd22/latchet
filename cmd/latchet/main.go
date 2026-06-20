@@ -100,6 +100,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		DryRun:      *dryRun,
 		MaxParallel: parallel,
 		DefaultEnv:  cfg.Env,
+		Functions:   cfg.Functions,
 		Stdout:      stdout,
 		Stderr:      stderr,
 	}
@@ -154,6 +155,7 @@ func runWatch(args []string, cfg *globalconfig.Config, stdout, stderr io.Writer)
 	return watch.Run(cfg, watch.Options{
 		MaxParallel: parallel,
 		DefaultEnv:  cfg.Env,
+		Functions:   cfg.Functions,
 		Stdout:      stdout,
 		Stderr:      stderr,
 	})
@@ -222,6 +224,7 @@ func runVerify(args []string, cfg *globalconfig.Config, stdout, stderr io.Writer
 		Explain:      *explain,
 		MaxParallel:  *maxParallel,
 		DefaultEnv:   cfg.Env,
+		Functions:    cfg.Functions,
 		Stdout:       stdout,
 		Stderr:       stderr,
 	})

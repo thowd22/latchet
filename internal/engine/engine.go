@@ -406,6 +406,14 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 	// step env. Their values are masked in this job's output by runOne.
 	secretEnv := resolveSecrets(wf, job)
 
+	// Inline any `call:` steps: replace each with the called function's steps,
+	// with the call's `with:` inputs expanded against the job's static env
+	// (everything known before steps run — not step outputs).
+	staticBase := mergeEnv(builtins, needsEnv, wf.Env, job.Env, secretEnv)
+	steps := config.ExpandCalls(job.Steps, wf.Functions, func(v string) string {
+		return config.ExpandVars(v, staticBase)
+	})
+
 	jobDir, err := ws.JobDir(job.ID)
 	if err != nil {
 		return scheduler.Result{ID: job.ID}, nil, err
@@ -441,7 +449,7 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 	outputs := map[string]string{} // accumulated NAME=value step outputs
 
 	chainTaken := false // an if/elif chain has already taken a branch
-	for i, step := range job.Steps {
+	for i, step := range steps {
 		name := step.Name
 		if name == "" {
 			name = fmt.Sprintf("step %d", i+1)

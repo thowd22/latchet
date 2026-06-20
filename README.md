@@ -460,6 +460,43 @@ This produces four jobs: `test (go=1.21, os=linux)`, `test (go=1.21, os=alpine)`
 - `inherit:` cannot name a matrix job (its parent would be ambiguous).
 - `latchet -dry-run` shows the expanded jobs.
 
+## Functions (reusable steps)
+
+A **function** is a named, parameterized sequence of steps you `call:` instead
+of repeating. Define functions in a workflow's `functions:` map (local) or in
+the [global config](#global-configuration) (machine-wide helpers); a local
+function shadows a global one of the same name.
+
+```yaml
+functions:
+  publish:
+    inputs:
+      image:   {required: true}      # must be supplied
+      registry: {default: ghcr.io}   # optional, with a default
+    steps:
+      - run: docker push $registry/$image      # inputs are env vars
+jobs:
+  release:
+    container: docker:cli
+    steps:
+      - run: docker build -t app .
+      - call: publish
+        with:
+          image: app:$LATCHET_GIT_SHA          # with-values expand the caller's env
+```
+
+- A `call:` step inlines the function's steps into the job — they run in the
+  same container and `/workspace`.
+- **Inputs** are passed as env vars to the function's steps. A `with:` value (or
+  an input's `default:`) may reference the caller's env (`$VAR`/`${VAR}`),
+  expanded against everything known before the steps run (built-ins, `needs`
+  outputs, workflow/job env, secrets — not step outputs).
+- A function "returns" by writing to `$LATCHET_ENV` (see [Step
+  outputs](#step-outputs)); those values are visible to steps after the call.
+- A `call:` step cannot also `run:` or carry `if:`/`elif:`/`else:`, and a
+  function's steps cannot `call:` another function (no nesting). Required inputs,
+  unknown functions, and bad `with:` keys are rejected at load time (exit `2`).
+
 ## Step outputs
 
 A step can hand a value to **later steps in the same job** by appending
@@ -572,6 +609,11 @@ watch:                          # repositories for `latchet watch`
   - url: git@github.com:me/app.git
     branches: [main]
     tags: ["v*"]
+functions:                      # machine-wide helpers callable from any job
+  notify:
+    inputs: {msg: {required: true}}
+    steps:
+      - run: echo "$msg"
 ```
 
 Precedence — **CLI flags > environment variables > global config > built-in

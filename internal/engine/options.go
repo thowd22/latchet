@@ -40,6 +40,10 @@ type Options struct {
 	// report — needed by `latchet watch`, which checks out a detached commit
 	// the probe can't map back to a branch. Empty for ordinary runs.
 	GitRef string
+
+	// Functions holds machine-wide (global) functions from the global config;
+	// a workflow's own `functions:` shadow these by name.
+	Functions map[string]*config.Function
 }
 
 // overlayDefaultEnv returns wf.Env with defaults merged underneath: a key set
@@ -128,6 +132,9 @@ func loadAndValidate(opts Options) (*config.Workflow, error) {
 		fmt.Fprintf(opts.Stderr, "latchet: %v\n", err)
 		return nil, err
 	}
+	// Overlay global functions before validating, so a `call:` to a global
+	// helper resolves; a workflow's own functions shadow globals by name.
+	wf.Functions = config.MergeFunctions(opts.Functions, wf.Functions)
 	if err := wf.Validate(); err != nil {
 		fmt.Fprintf(opts.Stderr, "latchet: %v\n", err)
 		return nil, err

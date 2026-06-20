@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/thowd22/latchet/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,6 +32,9 @@ type Config struct {
 	Location      string            `yaml:"location"` // machine identity injected as LATCHET_LOCATION (default "local")
 	Env           map[string]string `yaml:"env"`
 	Watch         []WatchEntry      `yaml:"watch"`
+	// Functions are machine-wide reusable step sequences, callable as helpers in
+	// any job's `call:`. A workflow's own `functions:` shadow these by name.
+	Functions map[string]*config.Function `yaml:"functions"`
 
 	Path string `yaml:"-"` // file it was loaded from; "" when no config exists
 }

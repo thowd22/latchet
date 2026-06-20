@@ -19,9 +19,10 @@ import (
 
 // Workflow is a complete latchet.yml document.
 type Workflow struct {
-	Name string            `yaml:"name"`
-	Env  map[string]string `yaml:"env"`
-	Jobs map[string]*Job   `yaml:"jobs"`
+	Name      string               `yaml:"name"`
+	Env       map[string]string    `yaml:"env"`
+	Jobs      map[string]*Job      `yaml:"jobs"`
+	Functions map[string]*Function `yaml:"functions"` // reusable step sequences callable via `call:`
 	// Deterministic, when true, applies the determinism helpers to every job
 	// (inject SOURCE_DATE_EPOCH, LC_ALL=C, LANG=C, TZ=UTC). A job may also set
 	// it individually; LATCHET_DETERMINISTIC=1 forces it on globally.
@@ -57,6 +58,9 @@ type Strategy struct {
 // condition: `if:` starts a chain, `elif:` continues it, and `else: true` is
 // the fallback. Within a chain the first branch whose condition is true runs;
 // the rest are skipped. A plain step (no condition) ends any open chain.
+//
+// Alternatively a step may `call:` a function instead of `run:`-ning a command;
+// the function's steps are inlined with the call's `with:` inputs.
 type Step struct {
 	Name string            `yaml:"name"`
 	Run  string            `yaml:"run"`
@@ -64,6 +68,22 @@ type Step struct {
 	If   string            `yaml:"if"`   // condition; starts a conditional chain
 	Elif string            `yaml:"elif"` // condition; continues the preceding if/elif chain
 	Else bool              `yaml:"else"` // `else: true`; fallback branch of the chain
+	Call string            `yaml:"call"` // name of a function to invoke instead of run
+	With map[string]string `yaml:"with"` // inputs passed to the called function
+}
+
+// Function is a reusable, parameterized sequence of steps invoked by `call:`.
+// Declared in a workflow's `functions:` (local) or the global latchet-ci.yml
+// (machine-wide); a local function shadows a global one of the same name.
+type Function struct {
+	Inputs map[string]*Input `yaml:"inputs"`
+	Steps  []*Step           `yaml:"steps"`
+}
+
+// Input declares a function parameter.
+type Input struct {
+	Required bool   `yaml:"required"`
+	Default  string `yaml:"default"`
 }
 
 // kind classifies a step's role in a conditional chain.
@@ -225,48 +245,7 @@ func (wf *Workflow) Validate() error {
 				errs = append(errs, fmt.Sprintf("job %q: cannot inherit from matrix job %q", id, job.Inherit))
 			}
 		}
-		chainOpen := false // a preceding if/elif a following elif/else can attach to
-		for i, step := range job.Steps {
-			if step == nil || strings.TrimSpace(step.Run) == "" {
-				errs = append(errs, fmt.Sprintf("job %q: step %d has an empty 'run'", id, i+1))
-				continue
-			}
-			// At most one of if/elif/else.
-			set := 0
-			if step.If != "" {
-				set++
-			}
-			if step.Elif != "" {
-				set++
-			}
-			if step.Else {
-				set++
-			}
-			if set > 1 {
-				errs = append(errs, fmt.Sprintf("job %q: step %d uses more than one of if/elif/else", id, i+1))
-			}
-			switch step.kind() {
-			case stepIf:
-				if err := cond.Check(step.If); err != nil {
-					errs = append(errs, fmt.Sprintf("job %q: step %d if: %v", id, i+1, err))
-				}
-				chainOpen = true
-			case stepElif:
-				if !chainOpen {
-					errs = append(errs, fmt.Sprintf("job %q: step %d elif: must follow an if/elif step", id, i+1))
-				}
-				if err := cond.Check(step.Elif); err != nil {
-					errs = append(errs, fmt.Sprintf("job %q: step %d elif: %v", id, i+1, err))
-				}
-			case stepElse:
-				if !chainOpen {
-					errs = append(errs, fmt.Sprintf("job %q: step %d else: must follow an if/elif step", id, i+1))
-				}
-				chainOpen = false // else closes the chain
-			default: // plain step ends any chain
-				chainOpen = false
-			}
-		}
+		errs = append(errs, validateSteps(fmt.Sprintf("job %q", id), job.Steps, wf.Functions, true)...)
 		for _, need := range job.Needs {
 			switch {
 			case need == id:
@@ -296,6 +275,26 @@ func (wf *Workflow) Validate() error {
 				}
 			}
 		}
+	}
+
+	// Validate function definitions (deterministic order). Function bodies may
+	// not themselves `call:` (no nesting).
+	fnames := make([]string, 0, len(wf.Functions))
+	for name := range wf.Functions {
+		fnames = append(fnames, name)
+	}
+	sort.Strings(fnames)
+	for _, name := range fnames {
+		fn := wf.Functions[name]
+		if len(fn.Steps) == 0 {
+			errs = append(errs, fmt.Sprintf("function %q: has no steps", name))
+		}
+		for in := range fn.Inputs {
+			if !validEnvName(in) {
+				errs = append(errs, fmt.Sprintf("function %q: input %q is not a valid env var name", name, in))
+			}
+		}
+		errs = append(errs, validateSteps(fmt.Sprintf("function %q", name), fn.Steps, wf.Functions, false)...)
 	}
 
 	// A cycle check only makes sense once every `needs` edge points somewhere

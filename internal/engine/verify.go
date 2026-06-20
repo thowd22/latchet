@@ -37,7 +37,8 @@ type VerifyOptions struct {
 	Strict       bool   // require every subject to match bit-for-bit
 	Explain      bool   // print per-subject mismatch detail
 	MaxParallel  int
-	DefaultEnv   map[string]string // global-config default env, applied to the re-run
+	DefaultEnv   map[string]string           // global-config default env, applied to the re-run
+	Functions    map[string]*config.Function // global functions available to the re-run
 	Stdout       io.Writer
 	Stderr       io.Writer
 }
@@ -152,6 +153,7 @@ func Verify(vo VerifyOptions) int {
 		fmt.Fprintf(warn, "latchet verify: %v\n", err)
 		return ExitConfig
 	}
+	wf.Functions = config.MergeFunctions(vo.Functions, wf.Functions)
 	if err := wf.Validate(); err != nil {
 		fmt.Fprintf(warn, "latchet verify: %v\n", err)
 		return ExitConfig

@@ -174,6 +174,19 @@ has "server: if branch runs (prod)"      "$CS" "BRANCH=prod"
 grep -qF "BRANCH=staging" "$CS" && bad "server: elif skipped" || ok "server: elif skipped"
 grep -qF "BRANCH=none" "$CS" && bad "server: else skipped" || ok "server: else skipped"
 
+echo "===== FUNCTIONS ====="
+FLOGS="$TMP/logs-fn"
+LATCHET_LOCATION=server LATCHET_LOG_DIR="$FLOGS" "$LATCHET" -file ci/fn-demo.yml >/dev/null 2>&1
+FNL="$FLOGS/latest/build.log"
+has "function inlined with inputs"        "$FNL" "TAG name=app suffix=server loc=server"
+has "function output flows to later step" "$FNL" "after call TAGGED=app-server"
+# validation: a call to an unknown function is rejected (exit 2)
+printf 'jobs:\n  a:\n    container: alpine:3.19\n    steps:\n      - {call: nope}\n' > "$TMP/badcall.yml"
+ec "unknown function -> exit 2" 2 "$LATCHET" -file "$TMP/badcall.yml" -validate-only
+# validation: missing required input is rejected
+printf 'name: x\nfunctions:\n  f:\n    inputs:\n      need: {required: true}\n    steps: [{run: echo hi}]\njobs:\n  a:\n    container: alpine:3.19\n    steps:\n      - {call: f}\n' > "$TMP/missingreq.yml"
+ec "missing required input -> exit 2" 2 "$LATCHET" -file "$TMP/missingreq.yml" -validate-only
+
 echo "===== STRATEGY MATRIX ====="
 MLOGS="$TMP/logs-matrix"
 LATCHET_LOG_DIR="$MLOGS" "$LATCHET" -file ci/matrix-demo.yml >"$TMP/mx.out" 2>&1
