@@ -12,6 +12,52 @@ pass before implementation.
   The largest item: needs action fetching/resolution and a substantially bigger
   runner. This is what would make latchet workflows reusable rather than purely
   inline.
+- **Functions (reusable parameterized steps)** — named, parameterized units of
+  workflow logic, *called* by name with inputs (and, eventually, outputs) like a
+  function. Think GitHub Actions **composite actions**, but defined **inline**
+  rather than fetched — the local-definition complement to `uses` above.
+  - **Two scopes.**
+    - **Global functions** live in the machine-wide `latchet-ci.yml` under a
+      `functions:` map and are available as helpers in *any* job on that
+      machine — a shared local library, no fetching, fully trusted since the
+      operator owns the file.
+    - **Local functions** live in a `latchet.yml`'s own `functions:` map and
+      are callable anywhere *in that file*. This is the parameterized successor
+      to YAML anchors: an anchor (`&x`/`*x`) splices a YAML node verbatim at
+      parse time with no inputs, whereas a function takes named inputs and can
+      behave differently per call. A local function shadows a global one of the
+      same name.
+  - **A function is a named sequence of steps** with declared `inputs:`
+    (optional defaults) and `outputs:`. Calling it **inlines its steps** into
+    the calling job, running in that job's container so it shares the image and
+    `/workspace`. Inputs are exposed to the function's steps as env vars;
+    unsupplied inputs fall back to their defaults.
+  - **Call site.** A step invokes a function by name with arguments, e.g.
+    `- call: notify-slack` + `with: {message: "deployed $LATCHET_GIT_SHA"}`.
+    Calls compose with ordinary steps and with `if:`/`elif:`/`else:`.
+
+    ```yaml
+    # latchet-ci.yml (global) or a latchet.yml (local)
+    functions:
+      notify-slack:
+        inputs:
+          message: {required: true}
+          channel:  {default: "#ci"}
+        steps:
+          - run: curl -s -X POST "$SLACK_WEBHOOK" -d "{\"channel\":\"$channel\",\"text\":\"$message\"}"
+    ```
+  - **Outputs depend on step outputs** — a mechanism latchet doesn't have yet
+    (shared with `strategy.matrix`/PR-fan-out and job-level conditionals). A
+    first cut can ship **inputs-only** functions (parameterized step reuse),
+    with named `outputs:` landing once step outputs exist; until then a
+    function "returns" by writing to `/workspace`.
+  - **Open design:** input typing/required-vs-default and validation; whether a
+    function may declare its own `container:` or always runs in the caller's;
+    nesting depth + recursion/cycle detection; strict parsing of the
+    `functions:` map and how the global+local namespaces merge; and whether
+    `uses` (remote) and functions (local) should share **one** invocation
+    runner — so a `uses` action is just a *fetched* function (`call:`/`uses:`
+    unified at the call site).
 
 #### Prebuilt actions / build steps
 
