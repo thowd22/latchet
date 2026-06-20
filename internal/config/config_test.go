@@ -164,6 +164,11 @@ func TestValidate(t *testing.T) {
 			yaml:    "jobs:\n  a:\n    container: x\n    outputs: [\"bad-name\"]\n    steps: [{run: echo a}]\n",
 			wantSub: `output "bad-name" is not a valid env var name`,
 		},
+		{
+			name:    "bad job if expression",
+			yaml:    "jobs:\n  a:\n    container: x\n    if: \"$X = 1\"\n    steps: [{run: echo a}]\n",
+			wantSub: "job \"a\": if:",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

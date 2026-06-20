@@ -182,15 +182,13 @@ getting started; seeds below (signed OCI builds first):
   `location: server` in the server's `latchet-ci.yml`; `latchet watch` runs
   inherit it. (Correct by design: the value lives in the machine-scoped global
   config, not the per-project `latchet.yml`, which is identical everywhere.)
-- ~~**Step conditionals (`if`/`elif`/`else`)**~~ — **shipped** (`internal/cond`,
-  wired in `engine.runJob`). A step may carry `if:`/`elif:`/`else: true`; within
-  a chain the first true branch runs and the rest are skipped (logged). The
-  condition language (`$VAR` expansion, `==`/`!=`/`&&`/`||`/`!`, parens,
-  truthiness) is evaluated by latchet against the step's merged env, validated
-  at load time. **Still open:** **job-level** conditionals — a `when:`/`if:` to
-  skip a whole *job* (reusing the DAG skip-propagation, so a
-  conditionally-skipped job propagates to its dependents like a needs-skip).
-  Today you gate the steps inside a job instead.
+- ~~**Conditionals (`if`/`elif`/`else`)**~~ — **shipped** (`internal/cond`).
+  **Steps** carry `if:`/`elif:`/`else: true` (first true branch in a chain runs,
+  rest skipped+logged); **jobs** carry a single `if:` (no elif/else — jobs form a
+  graph, not a chain) evaluated before the job starts, and a false job
+  propagates the skip to its dependents via the scheduler (like a needs-skip).
+  The condition language (`$VAR`, `==`/`!=`/`&&`/`||`/`!`, parens, truthiness) is
+  evaluated by latchet against the merged env, validated at load time.
 - **`strategy.matrix`** — fan a job across combinations of variables (e.g.
   multiple language versions).
 - **`on` / triggers** — event-based triggering instead of "run the whole file

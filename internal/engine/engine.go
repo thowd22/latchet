@@ -179,6 +179,28 @@ func (j *jobOutputs) needsEnv(needs []string) map[string]string {
 // gets only terse begin/end markers, since interleaving live step output
 // from concurrent jobs is unreadable.
 func runOne(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, ls *logstore.Run, wf *config.Workflow, jobID string, images *imageCache, stdout io.Writer, maxParallel int, git builtinenv.Git, outs *jobOutputs) (scheduler.Result, error) {
+	job := wf.Jobs[jobID]
+	// Outputs declared by this job's dependencies are injected as env vars.
+	needsEnv := outs.needsEnv([]string(job.Needs))
+
+	// Job-level condition: skip the whole job when false, before any log/setup.
+	// A skipped job propagates to its dependents via the scheduler (needs-skip).
+	if job.If != "" {
+		evalEnv := mergeEnv(jobBuiltins(ws.ID, job, wf, git), needsEnv, wf.Env, job.Env, resolveSecrets(wf, job))
+		ok, cerr := cond.Eval(job.If, evalEnv)
+		if cerr != nil {
+			return scheduler.Result{ID: jobID}, fmt.Errorf("job %q if: %w", jobID, cerr)
+		}
+		if !ok {
+			if maxParallel > 1 {
+				fmt.Fprintf(stdout, "\n== job: %s -> skipped (if condition false) ==\n", jobID)
+			} else {
+				log.JobSkip(stdout, jobID, "if condition false")
+			}
+			return scheduler.Result{ID: jobID, Status: scheduler.StatusSkipped, Detail: "if condition false"}, nil
+		}
+	}
+
 	logFile, logPath, err := ls.OpenJob(jobID)
 	if err != nil {
 		return scheduler.Result{ID: jobID}, err
@@ -194,12 +216,9 @@ func runOne(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, ls *log
 
 	// Mask declared secret values in everything this job writes (log file and,
 	// in serial mode, stdout). Passthrough when the job declares no secrets.
-	mw := mask.New(stepW, secretValues(resolveSecrets(wf, wf.Jobs[jobID])))
+	mw := mask.New(stepW, secretValues(resolveSecrets(wf, job)))
 
-	// Outputs declared by this job's dependencies are injected as env vars.
-	needsEnv := outs.needsEnv([]string(wf.Jobs[jobID].Needs))
-
-	res, exported, err := runJob(ctx, rt, ws, wf, wf.Jobs[jobID], images, mw, git, needsEnv)
+	res, exported, err := runJob(ctx, rt, ws, wf, job, images, mw, git, needsEnv)
 	mw.Close() // flush any masked tail held back across writes
 	if err == nil && res.Status == scheduler.StatusSuccess {
 		outs.set(jobID, exported)

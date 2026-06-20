@@ -88,8 +88,9 @@ Subcommands: `latchet verify <provenance.json>` (`engine.Verify`) and
 host env vars injected into steps and masked in logs + provenance
 (`internal/mask`, `provenance.Redact`). Global config: `internal/globalconfig`
 (`latchet-ci.yml`) — also sets `location:` → `LATCHET_LOCATION` built-in.
-Step conditionals: `if:`/`elif:`/`else:` on steps, evaluated by `internal/cond`
-(`$VAR`, `==`/`!=`/`&&`/`||`/`!`, parens) against the step's merged env.
+Conditionals: `if:`/`elif:`/`else:` on steps and a single `if:` on jobs
+(false job -> skipped, propagates to dependents), evaluated by `internal/cond`
+(`$VAR`, `==`/`!=`/`&&`/`||`/`!`, parens) against the merged env.
 Step outputs: a step appends `NAME=value` to `$LATCHET_ENV`
 (`builtinenv.EnvFileVar`, host-read from `jobDir/.latchet/env`); `engine.runJob`
 merges them into later steps' env. A job's declared `outputs:` are stored

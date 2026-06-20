@@ -1,0 +1,18 @@
+name: jobcond-demo
+# A job-level if: skips the whole job when false; its dependents are skipped
+# too (propagated by the scheduler, like a needs-skip).
+jobs:
+  always:
+    container: alpine:3.19
+    steps:
+      - run: echo "ALWAYS_RAN"
+  deploy:
+    container: alpine:3.19
+    if: $LATCHET_LOCATION == server     # false when LATCHET_LOCATION=local
+    steps:
+      - run: echo "DEPLOY_RAN"
+  after-deploy:
+    container: alpine:3.19
+    needs: deploy
+    steps:
+      - run: echo "AFTER_DEPLOY_RAN"

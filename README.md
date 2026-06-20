@@ -414,8 +414,22 @@ against the step's merged env:
 
 Invalid `if:`/`elif:` expressions and malformed chains (an `elif`/`else` with no
 preceding `if`) are rejected at load time (exit code `2`). To skip an entire
-*job* by condition, gate the steps inside it — job-level conditionals are a
-[roadmap item](ROADMAP.md#workflow-features).
+*job* by condition, put `if:` on the **job** instead — when false the whole job
+is skipped, and (like a `needs`-skip) its dependents are skipped too:
+
+```yaml
+jobs:
+  deploy:
+    container: alpine:3.19
+    if: $LATCHET_LOCATION == server   # whole job skipped unless on the server
+    steps:
+      - run: ./deploy.sh
+```
+
+A job `if:` is evaluated before the job starts, against the same env the job's
+first step would see (built-ins, `needs` outputs, workflow/job env, secrets) —
+but not step outputs (no step has run yet). Jobs take a single `if:` (no
+`elif`/`else`, since jobs form a dependency graph, not an ordered chain).
 
 ## Step outputs
 

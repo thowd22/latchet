@@ -174,6 +174,14 @@ has "server: if branch runs (prod)"      "$CS" "BRANCH=prod"
 grep -qF "BRANCH=staging" "$CS" && bad "server: elif skipped" || ok "server: elif skipped"
 grep -qF "BRANCH=none" "$CS" && bad "server: else skipped" || ok "server: else skipped"
 
+echo "===== JOB CONDITIONALS ====="
+env -u LATCHET_LOCATION LATCHET_LOG_DIR="$TMP/jc-local" "$LATCHET" -file ci/jobcond-demo.yml >"$TMP/jc-local.out" 2>&1
+has "job if false -> job skipped"        "$TMP/jc-local.out" "deploy -> skipped (if condition false)"
+has "skip propagates to dependent"       "$TMP/jc-local.out" "after-deploy -> skipped (deploy skipped)"
+has "unconditional job still runs"       "$TMP/jc-local.out" "always               success"
+LATCHET_LOCATION=server LATCHET_LOG_DIR="$TMP/jc-server" "$LATCHET" -file ci/jobcond-demo.yml >"$TMP/jc-server.out" 2>&1
+has "job if true -> job + dependent run" "$TMP/jc-server.out" "after-deploy         success"
+
 echo "===== STEP OUTPUTS ====="
 OLOGS="$TMP/logs-output"
 LATCHET_LOG_DIR="$OLOGS" "$LATCHET" -file ci/output-demo.yml >/dev/null 2>&1

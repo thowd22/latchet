@@ -43,6 +43,7 @@ type Job struct {
 	Deterministic bool              `yaml:"deterministic"` // apply determinism helpers to this job
 	Secrets       []string          `yaml:"secrets"`       // host env var names injected + masked for this job
 	Outputs       []string          `yaml:"outputs"`       // env var names (set via $LATCHET_ENV) exported to needs-dependents
+	If            string            `yaml:"if"`            // condition; the whole job is skipped when false (cond syntax)
 }
 
 // Step is one shell command run inside its job's container. A step may carry a
@@ -186,6 +187,11 @@ func (wf *Workflow) Validate() error {
 		for _, name := range job.Outputs {
 			if !validEnvName(name) {
 				errs = append(errs, fmt.Sprintf("job %q: output %q is not a valid env var name", id, name))
+			}
+		}
+		if job.If != "" {
+			if err := cond.Check(job.If); err != nil {
+				errs = append(errs, fmt.Sprintf("job %q: if: %v", id, err))
 			}
 		}
 		chainOpen := false // a preceding if/elif a following elif/else can attach to
