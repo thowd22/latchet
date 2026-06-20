@@ -431,6 +431,35 @@ first step would see (built-ins, `needs` outputs, workflow/job env, secrets) —
 but not step outputs (no step has run yet). Jobs take a single `if:` (no
 `elif`/`else`, since jobs form a dependency graph, not an ordered chain).
 
+## Matrix jobs (`strategy.matrix`)
+
+`strategy.matrix` fans a single job definition across every combination of the
+listed variables. Each combination becomes its own job (running in parallel),
+with the matrix variables available as env vars — and expanded into the
+`container:` image, so you can test across versions:
+
+```yaml
+jobs:
+  test:
+    container: golang:${go}            # ${go} is filled per combination
+    strategy:
+      matrix:
+        go: ["1.21", "1.22"]
+        os: ["linux", "alpine"]
+    steps:
+      - run: echo "go $go on $os"      # matrix vars are env vars
+```
+
+This produces four jobs: `test (go=1.21, os=linux)`, `test (go=1.21, os=alpine)`,
+`test (go=1.22, os=linux)`, `test (go=1.22, os=alpine)`.
+
+- A job that `needs:` a matrix job depends on **all** of its expansions (so an
+  aggregating job runs once, after the whole matrix).
+- Matrix variables are injected at job-env precedence; a step's own `env:` still
+  wins.
+- `inherit:` cannot name a matrix job (its parent would be ambiguous).
+- `latchet -dry-run` shows the expanded jobs.
+
 ## Step outputs
 
 A step can hand a value to **later steps in the same job** by appending

@@ -157,6 +157,7 @@ func Verify(vo VerifyOptions) int {
 		return ExitConfig
 	}
 	wf.Env = overlayDefaultEnv(vo.DefaultEnv, wf.Env)
+	wf = config.ExpandMatrix(wf)
 
 	// Pin each job's image to the digest recorded at the original run.
 	pinned := st.ResolvedImages()

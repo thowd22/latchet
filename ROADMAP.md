@@ -189,8 +189,11 @@ getting started; seeds below (signed OCI builds first):
   propagates the skip to its dependents via the scheduler (like a needs-skip).
   The condition language (`$VAR`, `==`/`!=`/`&&`/`||`/`!`, parens, truthiness) is
   evaluated by latchet against the merged env, validated at load time.
-- **`strategy.matrix`** — fan a job across combinations of variables (e.g.
-  multiple language versions).
+- ~~**`strategy.matrix`**~~ — **shipped** (`config.ExpandMatrix`). A job with
+  `strategy.matrix` is expanded (before the DAG) into one job per combination of
+  values — `test (go=1.21, os=linux)`, etc. — with the matrix vars set as env
+  and `$VAR`-expanded into `container:` (so `golang:${go}` works). A dependent of
+  a matrix job needs all expansions; `inherit:` of a matrix job is rejected.
 - **`on` / triggers** — event-based triggering instead of "run the whole file
   now."
 - **`runs-on`** — runner/label selection (currently rejected as an unknown key).

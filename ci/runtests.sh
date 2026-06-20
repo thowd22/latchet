@@ -174,6 +174,16 @@ has "server: if branch runs (prod)"      "$CS" "BRANCH=prod"
 grep -qF "BRANCH=staging" "$CS" && bad "server: elif skipped" || ok "server: elif skipped"
 grep -qF "BRANCH=none" "$CS" && bad "server: else skipped" || ok "server: else skipped"
 
+echo "===== STRATEGY MATRIX ====="
+MLOGS="$TMP/logs-matrix"
+LATCHET_LOG_DIR="$MLOGS" "$LATCHET" -file ci/matrix-demo.yml >"$TMP/mx.out" 2>&1
+has "matrix expands all combos"     "$TMP/mx.out" "build (arch=amd64, target=linux) success"
+has "matrix expands second dim"     "$TMP/mx.out" "build (arch=arm64, target=darwin) success"
+has "dependent waits for matrix"    "$TMP/mx.out" "collect              success"
+NB=$(grep -rh "BUILD target" "$MLOGS"/latest/build*.log | sort -u | wc -l)
+[ "$NB" = 4 ] && ok "matrix ran 4 distinct combos" || bad "matrix ran 4 distinct combos (got $NB)"
+"$LATCHET" -file ci/matrix-demo.yml -dry-run 2>&1 | grep -q "build (arch=amd64, target=linux)" && ok "dry-run shows expanded jobs" || bad "dry-run shows expanded jobs"
+
 echo "===== JOB CONDITIONALS ====="
 env -u LATCHET_LOCATION LATCHET_LOG_DIR="$TMP/jc-local" "$LATCHET" -file ci/jobcond-demo.yml >"$TMP/jc-local.out" 2>&1
 has "job if false -> job skipped"        "$TMP/jc-local.out" "deploy -> skipped (if condition false)"

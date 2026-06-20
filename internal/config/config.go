@@ -44,6 +44,13 @@ type Job struct {
 	Secrets       []string          `yaml:"secrets"`       // host env var names injected + masked for this job
 	Outputs       []string          `yaml:"outputs"`       // env var names (set via $LATCHET_ENV) exported to needs-dependents
 	If            string            `yaml:"if"`            // condition; the whole job is skipped when false (cond syntax)
+	Strategy      *Strategy         `yaml:"strategy"`      // fan this job across a matrix of variables (expanded before the run)
+}
+
+// Strategy configures how a job fans out. Matrix maps each variable name to its
+// list of values; the job is expanded into one job per combination of values.
+type Strategy struct {
+	Matrix map[string][]string `yaml:"matrix"`
 }
 
 // Step is one shell command run inside its job's container. A step may carry a
@@ -192,6 +199,30 @@ func (wf *Workflow) Validate() error {
 		if job.If != "" {
 			if err := cond.Check(job.If); err != nil {
 				errs = append(errs, fmt.Sprintf("job %q: if: %v", id, err))
+			}
+		}
+		if job.Strategy != nil {
+			if len(job.Strategy.Matrix) == 0 {
+				errs = append(errs, fmt.Sprintf("job %q: strategy.matrix is empty", id))
+			}
+			mkeys := make([]string, 0, len(job.Strategy.Matrix))
+			for k := range job.Strategy.Matrix {
+				mkeys = append(mkeys, k)
+			}
+			sort.Strings(mkeys)
+			for _, k := range mkeys {
+				if !validEnvName(k) {
+					errs = append(errs, fmt.Sprintf("job %q: matrix key %q is not a valid env var name", id, k))
+				}
+				if len(job.Strategy.Matrix[k]) == 0 {
+					errs = append(errs, fmt.Sprintf("job %q: matrix %q has no values", id, k))
+				}
+			}
+		}
+		// Inheriting from a matrix job is ambiguous (which expansion?).
+		if job.Inherit != "" {
+			if p := wf.Jobs[job.Inherit]; p != nil && p.Strategy != nil {
+				errs = append(errs, fmt.Sprintf("job %q: cannot inherit from matrix job %q", id, job.Inherit))
 			}
 		}
 		chainOpen := false // a preceding if/elif a following elif/else can attach to

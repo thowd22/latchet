@@ -45,6 +45,7 @@ func Run(opts Options) int {
 		return ExitConfig
 	}
 	wf.Env = overlayDefaultEnv(opts.DefaultEnv, wf.Env)
+	wf = config.ExpandMatrix(wf) // fan out strategy.matrix jobs before the DAG
 
 	rt, err := runtime.Detect()
 	if err != nil {
@@ -318,6 +319,27 @@ func stepShouldRun(step *config.Step, env map[string]string, chainTaken *bool) (
 	}
 }
 
+// containerName builds the runtime container name for a job. The job ID can
+// contain characters a matrix expansion introduces (spaces, parens, "=") that
+// docker/podman reject in names, so it is sanitized to [A-Za-z0-9_.-]; the
+// substitution is position-preserving, so distinct job IDs stay distinct.
+func containerName(runID, jobID string) string {
+	var b strings.Builder
+	b.WriteString("latchet-")
+	b.WriteString(runID)
+	b.WriteByte('-')
+	for _, r := range jobID {
+		switch {
+		case r == '_' || r == '.' || r == '-' ||
+			(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
 // readEnvFile parses a $LATCHET_ENV file into name->value. Each non-blank line
 // is `NAME=value` (value may contain `=`); lines without `=` or with an invalid
 // env-var name are ignored. A missing file yields no outputs and no error.
@@ -399,7 +421,7 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 		return scheduler.Result{ID: job.ID}, nil, err
 	}
 
-	container := fmt.Sprintf("latchet-%s-%s", ws.ID, job.ID)
+	container := containerName(ws.ID, job.ID)
 	if err := rt.Create(ctx, container, job.Container, jobDir); err != nil {
 		return scheduler.Result{ID: job.ID}, nil, err
 	}

@@ -1,0 +1,17 @@
+name: matrix-demo
+# strategy.matrix fans `build` across target x arch (4 jobs); matrix values are
+# env vars in the steps. `collect` needs build -> depends on all 4 expansions.
+jobs:
+  build:
+    container: alpine:3.19
+    strategy:
+      matrix:
+        target: [linux, darwin]
+        arch: [amd64, arm64]
+    steps:
+      - run: echo "BUILD target=$target arch=$arch"
+  collect:
+    container: alpine:3.19
+    needs: build
+    steps:
+      - run: echo "COLLECT ran after the matrix"

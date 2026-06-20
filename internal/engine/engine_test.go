@@ -41,6 +41,28 @@ func TestReadEnvFile(t *testing.T) {
 	}
 }
 
+func TestContainerName(t *testing.T) {
+	// A matrix job ID with spaces/parens/= must yield a runtime-safe name, and
+	// distinct IDs must stay distinct.
+	a := containerName("run1", "build (arch=amd64, target=linux)")
+	b := containerName("run1", "build (arch=arm64, target=linux)")
+	if a == b {
+		t.Fatal("distinct job IDs produced the same container name")
+	}
+	for _, name := range []string{a, b} {
+		for _, r := range name {
+			ok := r == '_' || r == '.' || r == '-' ||
+				(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+			if !ok {
+				t.Errorf("container name %q has invalid char %q", name, r)
+			}
+		}
+	}
+	if got := containerName("run1", "build"); got != "latchet-run1-build" {
+		t.Errorf("plain job: got %q", got)
+	}
+}
+
 func TestValidEnvName(t *testing.T) {
 	ok := []string{"A", "_x", "FOO_BAR", "x9", "LATCHET_GIT_SHA"}
 	bad := []string{"", "9x", "a-b", "a.b", "a b", "a=b"}

@@ -91,6 +91,7 @@ func DryRun(opts Options) int {
 	if err != nil {
 		return ExitConfig
 	}
+	wf = config.ExpandMatrix(wf) // show the expanded plan
 
 	g, err := dag.Build(wf.Deps())
 	if err != nil {

@@ -91,6 +91,8 @@ host env vars injected into steps and masked in logs + provenance
 Conditionals: `if:`/`elif:`/`else:` on steps and a single `if:` on jobs
 (false job -> skipped, propagates to dependents), evaluated by `internal/cond`
 (`$VAR`, `==`/`!=`/`&&`/`||`/`!`, parens) against the merged env.
+`strategy.matrix` (`config.ExpandMatrix`): a job is fanned into one per combo
+before the DAG; matrix vars set as env + `$`-expanded into `container:`.
 Step outputs: a step appends `NAME=value` to `$LATCHET_ENV`
 (`builtinenv.EnvFileVar`, host-read from `jobDir/.latchet/env`); `engine.runJob`
 merges them into later steps' env. A job's declared `outputs:` are stored
