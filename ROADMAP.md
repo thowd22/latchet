@@ -46,8 +46,7 @@ pass before implementation.
         steps:
           - run: curl -s -X POST "$SLACK_WEBHOOK" -d "{\"channel\":\"$channel\",\"text\":\"$message\"}"
     ```
-  - **Outputs depend on step outputs** — a mechanism latchet doesn't have yet
-    (shared with `strategy.matrix`/PR-fan-out and job-level conditionals). A
+  - **Outputs depend on the [Step / job outputs](#workflow-features) item.** A
     first cut can ship **inputs-only** functions (parameterized step reuse),
     with named `outputs:` landing once step outputs exist; until then a
     function "returns" by writing to `/workspace`.
@@ -95,9 +94,9 @@ getting started; seeds below (signed OCI builds first):
     detected from the remote host (`github.com` → `gh`, `gitlab.*` → `glab`),
     overridable; self-hosted instances supported via the CLIs' own config.
   - **Output as data, not control flow.** Writes the PR/MR list as JSON to
-    `/workspace` (and/or step outputs, once those exist) for downstream steps
-    to consume. latchet has no token handling — auth lives entirely in the
-    CLI.
+    `/workspace` (and/or [step outputs](#workflow-features), once those exist)
+    for downstream steps to consume. latchet has no token handling — auth lives
+    entirely in the CLI.
   - **Pairs with fan-out.** Acting *per* PR/MR needs
     [`strategy.matrix`](#workflow-features) or dynamic job generation (neither
     exists yet), so discovery ships first and the per-PR fan-out follows.
@@ -144,6 +143,38 @@ getting started; seeds below (signed OCI builds first):
   fan-in merges, exclude patterns, and persistence across runs.
 
 ### Workflow features
+- **Step / job outputs** — let a step *set* a value that later steps (and
+  downstream jobs) can read, without the `/workspace` file dance. The shared
+  prerequisite several items already lean on: **Functions'** `outputs:`,
+  **`strategy.matrix`** fan-in, the **Discover PRs/MRs** action, and job-level
+  conditionals.
+  - **Outputs are env vars (the Jenkins / GitHub-Actions model).** A step
+    appends `NAME=value` lines to a file latchet exposes as a built-in
+    `$LATCHET_ENV` path inside the container. After the step finishes latchet
+    reads that file and merges the new vars into the env of every **subsequent
+    step in the same job** — so passing a value between steps is just:
+
+    ```yaml
+    steps:
+      - run: echo "VERSION=$(cat VERSION)" >> "$LATCHET_ENV"
+      - run: echo "building $VERSION"        # VERSION is now set
+    ```
+
+    No expression syntax or `${{ }}` templating — values are plain env vars, set
+    above job/workflow env (a later step's own `env:` still wins).
+  - **Feasible with the existing mount.** `$LATCHET_ENV` lives under the job's
+    `/workspace` (host-side `<jobDir>/…`), already bind-mounted, so latchet reads
+    it host-side after each `exec` — no in-container agent needed.
+  - **Job outputs (cross-job).** A job may declare `outputs:` naming values
+    (drawn from its accumulated env) that latchet persists and injects into the
+    env of any job that `needs:` it — passing *values* across the
+    per-job-isolated container boundary, the way `inherit:` passes *files*.
+  - **Open design:** precedence of dynamic outputs vs a step's declared `env:`;
+    whether to also offer **named/namespaced** step outputs
+    (`steps.<id>.outputs.<x>`, which would need a reference syntax latchet has
+    avoided) or stay env-only; masking interaction (an output carrying a secret
+    value must still be redacted by `internal/mask`); recording outputs in
+    provenance; and line-format / size limits on the `$LATCHET_ENV` file.
 - ~~**Run location (`LATCHET_LOCATION`)**~~ — **shipped**
   (`globalconfig.Location`, `builtinenv.Location`). Machine-scoped location
   injected as the `LATCHET_LOCATION` built-in step var; resolution is the
