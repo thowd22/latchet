@@ -274,6 +274,44 @@ getting started; seeds below (signed OCI builds first):
   `LATCHET_INSTALL_DIR` honored. Exercised once a release is published (the
   release pipeline above provides the assets). Homebrew tap remains a
   follow-up.
+- **Self-update (`latchet update`) + new-release notifications** — keep an
+  installed binary current, and tell users when a newer version exists. Two
+  halves, the second depending on the first's release-discovery code:
+  - **Update-check / notification.** Compare `internal/version.Version` against
+    the latest published release. Discovery is a plain HTTPS GET of the GitHub
+    releases API (`/repos/thowd22/latchet/releases/latest`) parsed with
+    `net/http` + `encoding/json` — **no SDK, preserves the one-dependency
+    rule.** Two surfaces:
+    - **On demand:** `latchet update --check` prints current vs latest and the
+      release URL; exit non-zero when an update is available (scriptable).
+    - **Passive nudge:** after a run, a single non-intrusive line
+      (`a newer latchet (vX.Y.Z) is available — run 'latchet update'`) when a
+      newer release exists. The check is **cached** in the state dir with a TTL
+      (e.g. 24h) so it doesn't hit the network every run, runs **best-effort**
+      in the background (never blocks or fails a run), and is **opt-out** via
+      an env var (e.g. `LATCHET_NO_UPDATE_CHECK=1`) — important for CI/air-gapped
+      use. `dev`/unstamped builds never notify.
+  - **Apply (`latchet update`).** Download the release asset for the running
+    `GOOS/GOARCH`, **verify it**, and atomically replace the current binary.
+    Verification is the differentiator and **dogfoods latchet's own supply
+    chain**: fetch `SHA256SUMS` + `SHA256SUMS.bundle`, `cosign verify-blob`
+    the keyless signature against the release-workflow cert identity
+    (`--certificate-identity-regexp '^https://github\.com/thowd22/latchet/'`,
+    `--certificate-oidc-issuer https://token.actions.githubusercontent.com`),
+    then check the downloaded artifact's SHA256 against the (now-trusted)
+    `SHA256SUMS` before swapping. cosign is a **soft dependency** — design call
+    whether absence falls back to checksum-only with a loud warning or refuses;
+    leaning **refuse by default** (a signed CI tool shouldn't self-update
+    unverified), with `--insecure` to override. Replace via write-temp +
+    rename-into-place on the same filesystem (atomic on Unix); Windows needs the
+    rename-the-running-exe dance. Flags: `--check` (no apply), `--version vX.Y.Z`
+    (pin/downgrade), `--yes` (non-interactive). Respects where the binary
+    actually lives (resolve the symlink/real path), and refuses politely when
+    installed read-only (e.g. a system path needing sudo, or a Homebrew/package
+    install) with guidance to use the package manager instead.
+  - **Open design:** update channels (stable tags only vs pre-releases);
+    rollback / keeping the previous binary; signature-policy default
+    (refuse-vs-warn); and how this interacts with package-manager installs.
 - ~~**Global `latchet-ci.yml` config**~~ — **shipped** (`internal/globalconfig`).
   Machine-wide defaults (runtime, workspace root, log dir, `max_parallel`,
   default `env`, and the `watch:` repo list) loaded from `$LATCHET_CONFIG`,
