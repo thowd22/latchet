@@ -52,15 +52,19 @@ func detect(override string, lookPath func(string) (string, bool)) (string, erro
 
 // createArgs builds the args to create a long-lived job container. The
 // container idles on `sleep infinity` so that each step can `exec` into it
-// without paying container startup cost again.
+// without paying container startup cost again. The image's own entrypoint is
+// overridden: steps always run via exec, and an image whose ENTRYPOINT is a
+// tool (e.g. alpine/git) would otherwise swallow the keepalive command and
+// exit immediately.
 func createArgs(name, image, workspaceHost string) []string {
 	return []string{
 		"create",
 		"--name", name,
 		"-w", "/workspace",
 		"-v", workspaceHost + ":/workspace",
+		"--entrypoint", "sh",
 		image,
-		"sh", "-c", "sleep infinity",
+		"-c", "sleep infinity",
 	}
 }
 

@@ -46,8 +46,9 @@ func TestCreateArgs(t *testing.T) {
 		"--name", "latchet-run1-build",
 		"-w", "/workspace",
 		"-v", "/tmp/latchet/run1/build:/workspace",
+		"--entrypoint", "sh",
 		"alpine:3.19",
-		"sh", "-c", "sleep infinity",
+		"-c", "sleep infinity",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("createArgs = %v, want %v", got, want)

@@ -10,7 +10,7 @@
 name: keys-demo
 jobs:
   checkout:
-    container: alpine/git
+    container: docker.io/alpine/git # fully qualified: podman resolves official images only
     steps:
       - uses: git@github.com:thowd22/latchet-keys//checkout@v1
         with:
