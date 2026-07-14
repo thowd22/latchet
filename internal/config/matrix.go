@@ -33,6 +33,7 @@ func ExpandMatrix(wf *Workflow) *Workflow {
 		Deterministic: wf.Deterministic,
 		Secrets:       wf.Secrets,
 		Functions:     wf.Functions,
+		Keys:          wf.Keys,
 		Jobs:          make(map[string]*Job, len(wf.Jobs)),
 	}
 

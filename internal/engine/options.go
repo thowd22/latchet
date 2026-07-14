@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -8,6 +10,7 @@ import (
 
 	"github.com/thowd22/latchet/internal/config"
 	"github.com/thowd22/latchet/internal/dag"
+	"github.com/thowd22/latchet/internal/keys"
 )
 
 // Options configures a workflow run. Future v2 fields (DryRun, MaxParallel)
@@ -80,8 +83,8 @@ func (o Options) resolve() Options {
 // is safe to invoke in environments without docker or podman.
 func Validate(opts Options) int {
 	opts = opts.resolve()
-	if _, err := loadAndValidate(opts); err != nil {
-		return ExitConfig
+	if _, _, err := loadAndValidate(opts); err != nil {
+		return exitFor(err)
 	}
 	return ExitSuccess
 }
@@ -91,9 +94,9 @@ func Validate(opts Options) int {
 // runtime. Exit codes: 0 on success, ExitConfig on parse/validation error.
 func DryRun(opts Options) int {
 	opts = opts.resolve()
-	wf, err := loadAndValidate(opts)
+	wf, _, err := loadAndValidate(opts)
 	if err != nil {
-		return ExitConfig
+		return exitFor(err)
 	}
 	wf = config.ExpandMatrix(wf) // show the expanded plan
 
@@ -124,20 +127,42 @@ func DryRun(opts Options) int {
 	return ExitSuccess
 }
 
-// loadAndValidate parses the workflow file and runs Validate, reporting any
-// error to opts.Stderr. Used by both Validate and DryRun.
-func loadAndValidate(opts Options) (*config.Workflow, error) {
+// loadAndValidate parses the workflow file, resolves any `uses:` keys, and
+// runs Validate, reporting any error to opts.Stderr. Also returns the
+// resolved-keys map (verbatim uses string -> git+url[//subpath]@sha URI) for
+// provenance. Used by Run, Validate, and DryRun.
+func loadAndValidate(opts Options) (*config.Workflow, map[string]string, error) {
 	wf, err := config.Load(opts.File)
 	if err != nil {
 		fmt.Fprintf(opts.Stderr, "latchet: %v\n", err)
-		return nil, err
+		return nil, nil, err
 	}
 	// Overlay global functions before validating, so a `call:` to a global
 	// helper resolves; a workflow's own functions shadow globals by name.
 	wf.Functions = config.MergeFunctions(opts.Functions, wf.Functions)
+	// Fetch and resolve `uses:` keys before validating: checking a step's
+	// `with:` needs the key's declared inputs. SHA-pinned keys hit the local
+	// cache without touching the network.
+	fns, resolved, err := keys.ResolveAll(context.Background(), wf, opts.Stdout)
+	if err != nil {
+		fmt.Fprintf(opts.Stderr, "latchet: %v\n", err)
+		return nil, nil, err
+	}
+	wf.Keys = fns
 	if err := wf.Validate(); err != nil {
 		fmt.Fprintf(opts.Stderr, "latchet: %v\n", err)
-		return nil, err
+		return nil, nil, err
 	}
-	return wf, nil
+	return wf, resolved, nil
+}
+
+// exitFor maps a load/validate error to an exit code: fetch failures
+// (git/network/cache IO) are infrastructure errors, everything else is a
+// config error.
+func exitFor(err error) int {
+	var fe *keys.FetchError
+	if errors.As(err, &fe) {
+		return ExitInfra
+	}
+	return ExitConfig
 }

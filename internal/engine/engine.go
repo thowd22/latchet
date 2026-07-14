@@ -40,10 +40,11 @@ const (
 func Run(opts Options) int {
 	opts = opts.resolve()
 
-	wf, err := loadAndValidate(opts)
+	wf, resolvedKeys, err := loadAndValidate(opts)
 	if err != nil {
-		return ExitConfig
+		return exitFor(err)
 	}
+	_ = resolvedKeys // recorded in provenance (wired in the next step)
 	wf.Env = overlayDefaultEnv(opts.DefaultEnv, wf.Env)
 	wf = config.ExpandMatrix(wf) // fan out strategy.matrix jobs before the DAG
 
