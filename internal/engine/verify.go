@@ -15,6 +15,7 @@ import (
 	"github.com/thowd22/latchet/internal/builtinenv"
 	"github.com/thowd22/latchet/internal/config"
 	"github.com/thowd22/latchet/internal/dag"
+	"github.com/thowd22/latchet/internal/keys"
 	"github.com/thowd22/latchet/internal/log"
 	"github.com/thowd22/latchet/internal/logstore"
 	"github.com/thowd22/latchet/internal/provenance"
@@ -154,6 +155,31 @@ func Verify(vo VerifyOptions) int {
 		return ExitConfig
 	}
 	wf.Functions = config.MergeFunctions(vo.Functions, wf.Functions)
+
+	// Pin each uses: step to the key SHA recorded at the original run
+	// (mirroring the image pinning below), so the re-run fetches the exact
+	// key bytes even when a tag has since moved. The rewritten
+	// url[//subpath]@sha string is itself a valid reference.
+	pinnedKeys := st.ResolvedKeys()
+	for _, id := range sortedJobIDs(wf) {
+		for _, step := range wf.Jobs[id].Steps {
+			if step == nil || step.Uses == "" {
+				continue
+			}
+			if uri, ok := pinnedKeys[step.Uses]; ok && strings.HasPrefix(uri, "git+") {
+				step.Uses = strings.TrimPrefix(uri, "git+")
+			} else {
+				fmt.Fprintf(warn, "latchet verify: no recorded pin for key %q (job %q); using as-is\n", step.Uses, id)
+			}
+		}
+	}
+	fns, _, err := keys.ResolveAll(context.Background(), wf, out)
+	if err != nil {
+		fmt.Fprintf(warn, "latchet verify: %v\n", err)
+		return exitFor(err)
+	}
+	wf.Keys = fns
+
 	if err := wf.Validate(); err != nil {
 		fmt.Fprintf(warn, "latchet verify: %v\n", err)
 		return ExitConfig

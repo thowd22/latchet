@@ -95,12 +95,16 @@ type StepParams struct {
 	Else bool              `json:"else,omitempty"`
 }
 
-// Dependency is a build input pinned to a resolved digest (here, container
-// images resolved at pull time).
+// Dependency is a build input pinned to a resolved digest: container images
+// resolved at pull time (URI is the @sha256-pinned image ref) and fetched
+// keys resolved at fetch time (URI is git+<url>[//<subpath>]@<sha>).
 type Dependency struct {
 	URI  string `json:"uri"`
 	Name string `json:"name,omitempty"`
 }
+
+// keyURIPrefix marks a resolvedDependencies entry as a fetched key.
+const keyURIPrefix = "git+"
 
 type RunDetails struct {
 	Builder  Builder  `json:"builder"`
@@ -133,6 +137,7 @@ type Input struct {
 
 	Jobs     []JobParams       // internalParameters; sorted by ID in Build
 	Images   map[string]string // image ref as written -> resolved @sha256 digest
+	Keys     map[string]string // uses: ref as written -> resolved git+url[//subpath]@sha URI
 	Subjects []Subject         // hashed artifacts; sorted in Build
 }
 
@@ -149,9 +154,12 @@ func Build(in Input) Statement {
 		}}
 	}
 
-	deps := make([]Dependency, 0, len(in.Images))
+	deps := make([]Dependency, 0, len(in.Images)+len(in.Keys))
 	for ref, digest := range in.Images {
 		deps = append(deps, Dependency{URI: digest, Name: ref})
+	}
+	for ref, uri := range in.Keys {
+		deps = append(deps, Dependency{URI: uri, Name: ref})
 	}
 	sort.Slice(deps, func(i, j int) bool { return deps[i].Name < deps[j].Name })
 
@@ -334,12 +342,27 @@ func (s Statement) SubjectDigests() map[string]string {
 }
 
 // ResolvedImages maps each image reference (as written in the workflow) to the
-// digest-pinned URI recorded in resolvedDependencies.
+// digest-pinned URI recorded in resolvedDependencies. Key entries (git+ URIs)
+// are excluded.
 func (s Statement) ResolvedImages() map[string]string {
 	deps := s.Predicate.BuildDefinition.ResolvedDependencies
 	out := make(map[string]string, len(deps))
 	for _, d := range deps {
-		if d.Name != "" {
+		if d.Name != "" && !strings.HasPrefix(d.URI, keyURIPrefix) {
+			out[d.Name] = d.URI
+		}
+	}
+	return out
+}
+
+// ResolvedKeys maps each uses: reference (as written in the workflow) to the
+// SHA-pinned git+<url>[//<subpath>]@<sha> URI recorded in
+// resolvedDependencies.
+func (s Statement) ResolvedKeys() map[string]string {
+	deps := s.Predicate.BuildDefinition.ResolvedDependencies
+	out := map[string]string{}
+	for _, d := range deps {
+		if d.Name != "" && strings.HasPrefix(d.URI, keyURIPrefix) {
 			out[d.Name] = d.URI
 		}
 	}

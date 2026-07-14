@@ -22,7 +22,7 @@ import (
 // best-effort: any failure is reported as a warning and never changes the
 // run's exit code. Must be called after the run completes but before the
 // workspace is cleaned, so job artifacts are still on disk to hash.
-func emitProvenance(ctx context.Context, ws *workspace.Run, ls *logstore.Run, wf *config.Workflow, opts Options, git builtinenv.Git, images *imageCache, jobOuts *jobOutputs, maxParallel int, started, finished time.Time, out, warn io.Writer) {
+func emitProvenance(ctx context.Context, ws *workspace.Run, ls *logstore.Run, wf *config.Workflow, opts Options, git builtinenv.Git, images *imageCache, resolvedKeys map[string]string, jobOuts *jobOutputs, maxParallel int, started, finished time.Time, out, warn io.Writer) {
 	wfBytes, err := os.ReadFile(opts.File)
 	if err != nil {
 		fmt.Fprintf(warn, "latchet: provenance skipped: %v\n", err)
@@ -103,6 +103,7 @@ func emitProvenance(ctx context.Context, ws *workspace.Run, ls *logstore.Run, wf
 		Source:   source,
 		Jobs:     jobs,
 		Images:   images.ResolvedDigests(),
+		Keys:     resolvedKeys,
 		Subjects: subjects,
 	})
 

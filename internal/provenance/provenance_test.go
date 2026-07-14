@@ -63,6 +63,46 @@ func TestBuildDeterministicAndSorted(t *testing.T) {
 	}
 }
 
+func TestBuildRecordsKeysAndAccessorsSplit(t *testing.T) {
+	const usesRef = "git@github.com:me/keys//checkout@v1"
+	const keyURI = "git+git@github.com:me/keys//checkout@0123456789abcdef0123456789abcdef01234567"
+	in := sampleInput()
+	in.Keys = map[string]string{usesRef: keyURI}
+	st := Build(in)
+
+	deps := st.Predicate.BuildDefinition.ResolvedDependencies
+	if len(deps) != 3 {
+		t.Fatalf("want 3 resolved deps (2 images + 1 key), got %d: %+v", len(deps), deps)
+	}
+	found := false
+	for _, d := range deps {
+		if d.Name == usesRef && d.URI == keyURI {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("key dep not recorded: %+v", deps)
+	}
+
+	// The accessors split deps by kind: images exclude git+ URIs, keys are
+	// only git+ URIs.
+	imgs := st.ResolvedImages()
+	if len(imgs) != 2 {
+		t.Errorf("ResolvedImages includes key entries: %v", imgs)
+	}
+	ks := st.ResolvedKeys()
+	if len(ks) != 1 || ks[usesRef] != keyURI {
+		t.Errorf("ResolvedKeys = %v, want %q -> %q", ks, usesRef, keyURI)
+	}
+
+	// Determinism holds with keys present.
+	a, _ := json.Marshal(Build(in))
+	b, _ := json.Marshal(Build(in))
+	if string(a) != string(b) {
+		t.Error("Build not deterministic with keys")
+	}
+}
+
 func TestBuildEmptySubjectsFallsBackToWorkflow(t *testing.T) {
 	in := sampleInput()
 	in.Subjects = nil

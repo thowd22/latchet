@@ -44,7 +44,6 @@ func Run(opts Options) int {
 	if err != nil {
 		return exitFor(err)
 	}
-	_ = resolvedKeys // recorded in provenance (wired in the next step)
 	wf.Env = overlayDefaultEnv(opts.DefaultEnv, wf.Env)
 	wf = config.ExpandMatrix(wf) // fan out strategy.matrix jobs before the DAG
 
@@ -136,7 +135,7 @@ func Run(opts Options) int {
 	}
 
 	// Emit SLSA provenance before cleanup, while job artifacts still exist.
-	emitProvenance(context.Background(), ws, ls, wf, opts, git, images, jobOuts, maxParallel, started, finished, opts.Stdout, opts.Stderr)
+	emitProvenance(context.Background(), ws, ls, wf, opts, git, images, resolvedKeys, jobOuts, maxParallel, started, finished, opts.Stdout, opts.Stderr)
 
 	if kept := ws.Cleanup(exit != ExitSuccess); kept != "" {
 		fmt.Fprintf(opts.Stdout, "\nworkspace kept at %s\n", kept)
