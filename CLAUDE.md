@@ -40,6 +40,7 @@ internal/
   config/      YAML schema, strict parsing (KnownFields), aggregated Validate()
   dag/         generic graph: topo Order, Waves, Kahn cycle detection
   envutil/     ordered env merge: built-in -> workflow -> job -> step
+  keys/        uses: keys — parse url//subpath@ref, resolve tag->SHA, fetch+cache
   builtinenv/  LATCHET_* vars injected into every step (git facts, run/job ids)
   workspace/   per-run/per-job host dirs, inherit Seed(), cleanup policy
   runtime/     docker/podman detect + container lifecycle (pure argv builders)
@@ -52,13 +53,15 @@ testdata/      sample workflows for integration tests
 ```
 
 Imports are acyclic: `main` → `engine` → everything; `scheduler` → `dag`;
-`version` is leaf. `dag` and `scheduler` are deliberately generic (know nothing
-about jobs/containers) so they can't form import cycles and are tested
+`engine` → `keys` → `config` (`config` never imports `keys`: resolved keys
+are handed to it via the non-YAML `Workflow.Keys` field); `version` is leaf.
+`dag` and `scheduler` are deliberately generic (know nothing about
+jobs/containers) so they can't form import cycles and are tested
 hermetically.
 
 ## Conventions that matter here
 
-- **Strict YAML.** Unknown keys (`uses`, `strategy`, `runs-on`, …) are rejected
+- **Strict YAML.** Unknown keys (`runs-on`, `timeout-minutes`, …) are rejected
   at parse time, not ignored. Adding a workflow field means touching
   `internal/config` schema + `Validate()`.
 - **One container per job, `exec` per step** (not `docker run` per step). Steps
@@ -78,7 +81,8 @@ hermetically.
 `LATCHET_RUNTIME`, `LATCHET_WORKSPACE_ROOT`, `LATCHET_KEEP_WORKSPACE`,
 `LATCHET_LOG_DIR`, `LATCHET_COSIGN_KEY`, `LATCHET_COSIGN_TLOG`,
 `LATCHET_DETERMINISTIC`, `LATCHET_CONFIG` (global `latchet-ci.yml` path),
-`LATCHET_WATCH_STATE` (`latchet watch` state file). Distinct from
+`LATCHET_WATCH_STATE` (`latchet watch` state file), `LATCHET_KEYS_CACHE`
+(fetched-keys cache dir). Distinct from
 the output-only `LATCHET_*` vars `builtinenv` *injects* into steps
 (`LATCHET_WORKSPACE`, `LATCHET_RUN_ID`, `LATCHET_JOB_ID`, `LATCHET_GIT_*`).
 
@@ -96,6 +100,15 @@ before the DAG; matrix vars set as env + `$`-expanded into `container:`.
 Functions (`config.Function`, `config.ExpandCalls`): `functions:` in workflow
 (local) or `latchet-ci.yml` (global, local shadows global via `MergeFunctions`);
 a `call:` step with `with:` inputs inlines the function's steps into the job.
+Keys (`internal/keys`): a `uses: <git url>[//<subpath>]@<ref>` step invokes a
+*fetched* function — a `key.yml` in a remote repo (catalog:
+`thowd22/latchet-keys`). Pinned to tag/SHA only; `keys.ResolveAll` runs in
+`engine.loadAndValidate` before `Validate` (checking `with:` needs the key's
+inputs), caches clones by SHA under `$XDG_CACHE_HOME/latchet/keys/`
+(`LATCHET_KEYS_CACHE` overrides), and returns resolved
+`git+url[//subpath]@sha` URIs recorded as provenance `resolvedDependencies`
+(`latchet verify` re-pins to the recorded SHA). Fetch failures exit 3
+(`keys.FetchError` via `exitFor`); bad refs/`key.yml` exit 2.
 Step outputs: a step appends `NAME=value` to `$LATCHET_ENV`
 (`builtinenv.EnvFileVar`, host-read from `jobDir/.latchet/env`); `engine.runJob`
 merges them into later steps' env. A job's declared `outputs:` are stored

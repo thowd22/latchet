@@ -8,10 +8,17 @@ pass before implementation.
 ## v2 candidates
 
 ### High impact
-- **`uses` / reusable actions** — run pre-packaged steps from another repo.
-  The largest item: needs action fetching/resolution and a substantially bigger
-  runner. This is what would make latchet workflows reusable rather than purely
-  inline.
+- ~~**`uses` / reusable actions — "keys"**~~ — **shipped** (`internal/keys`).
+  A key is a *fetched function*: a directory in a remote git repo holding a
+  `key.yml` (same `inputs:`/`steps:` shape as a function), invoked by a
+  `uses: <git url>[//<subpath>]@<ref>` step and inlined via the same
+  `ExpandCalls` path as `call:`. Pinned to tags/SHAs only (branches rejected);
+  clones cached content-addressed by SHA under
+  `$XDG_CACHE_HOME/latchet/keys/`; each fetched key recorded SHA-pinned in
+  provenance `resolvedDependencies` and re-pinned by `latchet verify`.
+  Catalog repo: [thowd22/latchet-keys](https://github.com/thowd22/latchet-keys)
+  (first key: `checkout`). **Still open:** per-key `container:`; `if:` on a
+  `uses:` step; key-level declared `outputs:`.
 - ~~**Functions (reusable parameterized steps)**~~ — **shipped**
   (`config.Function`, `config.ExpandCalls`). Named, parameterized step
   sequences `call:`-ed by name — composite actions, defined **inline** rather
@@ -38,15 +45,18 @@ pass before implementation.
     ```
   - **Still open:** declared function-level `outputs:` (today outputs flow
     implicitly via `$LATCHET_ENV`); a function declaring its own `container:`;
-    `if:` on a call step; and unifying `uses` (remote) + functions (local) under
-    one invocation runner so a `uses` action is a *fetched* function.
+    and `if:` on a call step. ~~Unifying `uses` (remote) + functions (local)~~ —
+    **shipped**: a `uses:` key *is* a fetched function, validated and inlined
+    through the same `validateWith`/`ExpandCalls` path.
 
-#### Prebuilt actions / build steps
+#### Prebuilt actions / build steps — the keys catalog
 
 A catalog of pre-packaged, reusable steps a workflow can invoke — the concrete
-payload of the `uses` item above. Each would be a versioned unit of common
-build/publish behavior so authors don't hand-roll it inline. The list is just
-getting started; seeds below (signed OCI builds first):
+payload of the shipped `uses`/keys machinery above, now living in
+[thowd22/latchet-keys](https://github.com/thowd22/latchet-keys). Each is a
+versioned key (a `key.yml` at a subpath, tagged) so authors don't hand-roll
+common build/publish behavior inline. `checkout` shipped first; seeds below
+(signed OCI builds next):
 
 - **Signed OCI image build** *(prebuild action)* — build a container image
   from a Dockerfile + context, push it to a registry, and `cosign attest` the
@@ -59,10 +69,10 @@ getting started; seeds below (signed OCI builds first):
   design: builder backend (`docker build` / `buildah` / BuildKit), registry
   auth, and whether the image digest + attestation fold into the run's
   `provenance.json` as a subject / resolvedDependency.
-- **Checkout** *(prebuild action)* — a built-in repository checkout, removing
-  the "every job clones its own source" boilerplate (latchet has no implicit
-  checkout today; see [README](README.md#checking-out-your-code)). Clones
-  `LATCHET_GIT_URL` at `LATCHET_GIT_SHA` into `/workspace`.
+- ~~**Checkout** *(prebuild action)*~~ — **shipped** as the first key
+  (`thowd22/latchet-keys//checkout@v1`): clones `LATCHET_GIT_URL` at
+  `LATCHET_GIT_SHA` into `/workspace` (init + shallow fetch + FETCH_HEAD, so
+  it works in a non-empty workspace; the job's container needs `git`).
 - **Dependency cache** *(prebuild action)* — restore/save a keyed cache
   (Go modules, npm, pip, …); the step form of the
   [shared cache mount](#workflow-features) item.
@@ -644,11 +654,19 @@ image build** prebuilt action; `diffoscope` byte-diffing in `verify
 --explain` needs the original artifact bytes, which the manifest deliberately
 records only as hashes.
 
+Done so far (cont.):
+16. ~~**`uses` / reusable actions — keys**~~ — shipped (`internal/keys` +
+    the [thowd22/latchet-keys](https://github.com/thowd22/latchet-keys)
+    catalog, starting with `checkout`). Fetched functions pinned to
+    tags/SHAs, SHA-cached, recorded in provenance, re-pinned by
+    `latchet verify`.
+
 Next picks (in rough order of value-per-effort):
-1. **`uses` / reusable actions** (and the **Prebuilt actions / build steps**
-   catalog, incl. signed OCI builds — credential-taking actions are now
-   unblocked by secret masking) — still the largest single item; do it once
-   the engine is stable and the supply-chain story is in place (so fetched
-   actions can be verified).
+1. **Grow the keys catalog** (`latchet-keys`): signed OCI image build,
+   dependency cache, discover open PRs/MRs, AI build steps — credential-taking
+   keys are unblocked by secret masking. Per-key `container:` in the engine
+   would let a key bundle its own toolchain.
+2. **Self-update (`latchet update`) + new-release notifications** — designed
+   above; dogfoods the release supply chain.
 
 Everything else can follow demand.

@@ -125,15 +125,15 @@ jobs:
   Single parent only; named-artifact upload/download is not yet supported.
 - `env` merges built-in → workflow → job → step, highest precedence last
   (see [Built-in step variables](#built-in-step-variables)).
-- Unknown keys (`uses`, `strategy`, `runs-on`, ...) are rejected — they
+- Unknown keys (`runs-on`, `timeout-minutes`, ...) are rejected — they
   are not supported.
 
 ## Checking out your code
 
 latchet does **not** check out your repository for you. Every job starts
-with an **empty** `/workspace`, and there is no `actions/checkout`
-equivalent (`uses` is unsupported). If a job needs your source, clone it
-yourself as the first step:
+with an **empty** `/workspace`. If a job needs your source, use the
+[`checkout` key](#keys-fetched-reusable-steps) — or clone it yourself as
+the first step:
 
 ```yaml
 jobs:
@@ -497,6 +497,54 @@ jobs:
   function's steps cannot `call:` another function (no nesting). Required inputs,
   unknown functions, and bad `with:` keys are rejected at load time (exit `2`).
 
+## Keys (fetched reusable steps)
+
+A **key** is a function fetched from a git repo: a directory containing a
+`key.yml` (the same `inputs:`/`steps:` shape as a function) that a step
+invokes with `uses:` instead of `call:`. The reference names the repo, the
+directory, and a pinned ref:
+
+```
+<git url>[//<subpath>]@<ref>
+```
+
+```yaml
+jobs:
+  test:
+    container: alpine/git
+    steps:
+      - uses: git@github.com:thowd22/latchet-keys//checkout@v1
+        with:
+          ref: $LATCHET_GIT_SHA
+      - run: ls   # your source is now in /workspace
+```
+
+The official catalog lives at
+[thowd22/latchet-keys](https://github.com/thowd22/latchet-keys) — starting
+with `checkout`, which clones the triggering repo/commit into `/workspace`
+(the job's container needs `git`, e.g. `alpine/git`).
+
+How it works:
+
+- **Fetching happens on the host**, before validation, with your ambient
+  `git` setup (SSH keys, credential helpers) — latchet never handles tokens.
+  The key's steps then run inside the job's container like any other steps.
+- **Pin to a tag or a full commit SHA.** Branch refs are rejected at load
+  time — runs must be reproducible. Tags are re-resolved (`git ls-remote`)
+  every run, so a moved tag like `v1` is picked up; a SHA pin is immutable
+  and works **offline** once cached.
+- **Cache:** fetched keys live under `$XDG_CACHE_HOME/latchet/keys/<sha>`
+  (override with `LATCHET_KEYS_CACHE`), content-addressed by commit.
+- **Provenance:** every fetched key is recorded in the run's
+  `provenance.json` as a `resolvedDependencies` entry
+  (`git+<url>[//<subpath>]@<sha>`), and `latchet verify` re-runs with the
+  recorded SHA even if the tag has since moved.
+- Same rules as `call:`: inputs are env vars, `with:` values expand against
+  the caller's env, required/undeclared inputs are load-time errors, no
+  `run:`/`if:` on a `uses:` step, and a key's own steps must be plain
+  `run:` steps. A failure to fetch (network, unreachable repo) exits `3`;
+  a bad reference or invalid `key.yml` exits `2`.
+
 ## Step outputs
 
 A step can hand a value to **later steps in the same job** by appending
@@ -657,8 +705,8 @@ appeared or moved, it clones that commit and runs the repo's `latchet.yml`.
   pip, …) are not shared — every job re-downloads its dependencies. Warm a
   cache within a single job, or hand artifacts to a child job with
   `inherit:`. A shared cache mount is on the [roadmap](ROADMAP.md).
-- **No implicit checkout** — clone your repo yourself (see [Checking out
-  your code](#checking-out-your-code)).
+- **No implicit checkout** — use the `checkout` key or clone your repo
+  yourself (see [Checking out your code](#checking-out-your-code)).
 
 ## Examples
 
@@ -674,7 +722,8 @@ feature:
   [`cond-demo.yml`](ci/cond-demo.yml), [`jobcond-demo.yml`](ci/jobcond-demo.yml),
   [`output-demo.yml`](ci/output-demo.yml),
   [`crossjob-demo.yml`](ci/crossjob-demo.yml),
-  [`secret-demo.yml`](ci/secret-demo.yml) — single-feature demos
+  [`secret-demo.yml`](ci/secret-demo.yml),
+  [`keys-demo.yml`](ci/keys-demo.yml) — single-feature demos
 - [`runtests.sh`](ci/runtests.sh) — the feature test harness (run on a host with
   a container runtime)
 
