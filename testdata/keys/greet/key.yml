@@ -1,0 +1,8 @@
+# Test fixture key: greet says hi. Committed into a throwaway git repo by the
+# engine tests, then fetched back through the uses: machinery.
+inputs:
+  who: { required: true }
+  punct: { default: "!" }
+steps:
+  - name: greet
+    run: echo "hi $who$punct"

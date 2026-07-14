@@ -1,0 +1,21 @@
+# Demo: keys — fetched reusable actions.
+#
+# A `uses:` step fetches a key (a parameterized step sequence) from a remote
+# git repo, pinned to a tag or commit SHA, and inlines its steps. Here the
+# `checkout` key from thowd22/latchet-keys clones this repo into /workspace.
+# The fetch happens on the host over your ambient git/SSH setup; the key's
+# steps run inside the job's container (which therefore needs git).
+#
+#   ./latchet -file ci/keys-demo.yml
+name: keys-demo
+jobs:
+  checkout:
+    container: alpine/git
+    steps:
+      - uses: git@github.com:thowd22/latchet-keys//checkout@v1
+        with:
+          # Fetch over HTTPS inside the container (no SSH keys in there);
+          # ref defaults to $LATCHET_GIT_SHA — the commit that triggered us.
+          url: https://github.com/thowd22/latchet.git
+      - name: prove it
+        run: git log --oneline -1 && ls
