@@ -227,9 +227,15 @@ func Verify(vo VerifyOptions) int {
 	if maxParallel < 1 {
 		maxParallel = 1
 	}
-	// The re-run's own git facts do not affect artifact hashes; a fallback
-	// SOURCE_DATE_EPOCH is still provided in case the workflow is deterministic.
+	// Re-run with the cause-of-build git facts recorded in the manifest, so
+	// steps (and keys, e.g. checkout) that read LATCHET_GIT_URL/SHA reproduce
+	// the original inputs rather than probing this host's CWD. CommitEpoch
+	// falls back to now for SOURCE_DATE_EPOCH in deterministic workflows.
 	git := builtinenv.Git{CommitEpoch: strconv.FormatInt(time.Now().Unix(), 10)}
+	if src := st.Predicate.BuildDefinition.ExternalParameters.Source; src != nil {
+		git.URL, git.SHA = src.URI, src.Revision
+		git = builtinenv.OverrideRef(git, src.Ref)
+	}
 
 	jobOuts := newJobOutputs()
 	results, infraErr := scheduler.Run(context.Background(), g, scheduler.Options{
