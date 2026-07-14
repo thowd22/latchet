@@ -59,10 +59,10 @@ func emitProvenance(ctx context.Context, ws *workspace.Run, ls *logstore.Run, wf
 		secretEnv := resolveSecrets(wf, job)
 		secrets := secretValues(secretEnv)
 		needsEnv := jobOuts.needsEnv([]string(job.Needs))
-		// Record the actually-executed steps (call: steps inlined), mirroring
-		// the engine's expansion so the attestation reflects what ran.
+		// Record the actually-executed steps (call: and uses: steps inlined),
+		// mirroring the engine's expansion so the attestation reflects what ran.
 		staticBase := mergeEnv(builtins, needsEnv, wf.Env, job.Env, secretEnv)
-		jobSteps := config.ExpandCalls(job.Steps, wf.Functions, func(v string) string {
+		jobSteps := config.ExpandCalls(job.Steps, wf.Functions, wf.Keys, func(v string) string {
 			return config.ExpandVars(v, staticBase)
 		})
 		steps := make([]provenance.StepParams, 0, len(jobSteps))

@@ -23,6 +23,10 @@ type Workflow struct {
 	Env       map[string]string    `yaml:"env"`
 	Jobs      map[string]*Job      `yaml:"jobs"`
 	Functions map[string]*Function `yaml:"functions"` // reusable step sequences callable via `call:`
+	// Keys holds resolved `uses:` keys (fetched functions), keyed by the
+	// verbatim uses string. Not part of the YAML schema: the engine fetches
+	// and populates it (internal/keys.ResolveAll) before Validate runs.
+	Keys map[string]*Function `yaml:"-"`
 	// Deterministic, when true, applies the determinism helpers to every job
 	// (inject SOURCE_DATE_EPOCH, LC_ALL=C, LANG=C, TZ=UTC). A job may also set
 	// it individually; LATCHET_DETERMINISTIC=1 forces it on globally.
@@ -59,8 +63,9 @@ type Strategy struct {
 // the fallback. Within a chain the first branch whose condition is true runs;
 // the rest are skipped. A plain step (no condition) ends any open chain.
 //
-// Alternatively a step may `call:` a function instead of `run:`-ning a command;
-// the function's steps are inlined with the call's `with:` inputs.
+// Alternatively a step may `call:` a function or `uses:` a key (a fetched
+// function from a remote git repo) instead of `run:`-ning a command; the
+// function's steps are inlined with the step's `with:` inputs.
 type Step struct {
 	Name string            `yaml:"name"`
 	Run  string            `yaml:"run"`
@@ -69,7 +74,8 @@ type Step struct {
 	Elif string            `yaml:"elif"` // condition; continues the preceding if/elif chain
 	Else bool              `yaml:"else"` // `else: true`; fallback branch of the chain
 	Call string            `yaml:"call"` // name of a function to invoke instead of run
-	With map[string]string `yaml:"with"` // inputs passed to the called function
+	Uses string            `yaml:"uses"` // key reference (url//subpath@ref) to invoke instead of run
+	With map[string]string `yaml:"with"` // inputs passed to the called function or key
 }
 
 // Function is a reusable, parameterized sequence of steps invoked by `call:`.
@@ -149,7 +155,7 @@ func (s *StringOrSlice) UnmarshalYAML(value *yaml.Node) error {
 }
 
 // Load reads and parses a latchet.yml file. Unknown keys are rejected so that
-// typos and unsupported GitHub Actions features (uses, strategy, runs-on, ...)
+// typos and unsupported GitHub Actions features (runs-on, timeout-minutes, ...)
 // fail loudly instead of being silently ignored.
 func Load(path string) (*Workflow, error) {
 	f, err := os.Open(path)
@@ -245,7 +251,7 @@ func (wf *Workflow) Validate() error {
 				errs = append(errs, fmt.Sprintf("job %q: cannot inherit from matrix job %q", id, job.Inherit))
 			}
 		}
-		errs = append(errs, validateSteps(fmt.Sprintf("job %q", id), job.Steps, wf.Functions, true)...)
+		errs = append(errs, validateSteps(fmt.Sprintf("job %q", id), job.Steps, wf.Functions, wf.Keys, true)...)
 		for _, need := range job.Needs {
 			switch {
 			case need == id:
@@ -278,7 +284,7 @@ func (wf *Workflow) Validate() error {
 	}
 
 	// Validate function definitions (deterministic order). Function bodies may
-	// not themselves `call:` (no nesting).
+	// not themselves `call:` or `uses:` (no nesting).
 	fnames := make([]string, 0, len(wf.Functions))
 	for name := range wf.Functions {
 		fnames = append(fnames, name)
@@ -294,7 +300,7 @@ func (wf *Workflow) Validate() error {
 				errs = append(errs, fmt.Sprintf("function %q: input %q is not a valid env var name", name, in))
 			}
 		}
-		errs = append(errs, validateSteps(fmt.Sprintf("function %q", name), fn.Steps, wf.Functions, false)...)
+		errs = append(errs, validateSteps(fmt.Sprintf("function %q", name), fn.Steps, wf.Functions, nil, false)...)
 	}
 
 	// A cycle check only makes sense once every `needs` edge points somewhere

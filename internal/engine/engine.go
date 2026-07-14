@@ -406,11 +406,12 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 	// step env. Their values are masked in this job's output by runOne.
 	secretEnv := resolveSecrets(wf, job)
 
-	// Inline any `call:` steps: replace each with the called function's steps,
-	// with the call's `with:` inputs expanded against the job's static env
-	// (everything known before steps run — not step outputs).
+	// Inline any `call:` (function) and `uses:` (key) steps: replace each with
+	// the invoked function's steps, with the step's `with:` inputs expanded
+	// against the job's static env (everything known before steps run — not
+	// step outputs).
 	staticBase := mergeEnv(builtins, needsEnv, wf.Env, job.Env, secretEnv)
-	steps := config.ExpandCalls(job.Steps, wf.Functions, func(v string) string {
+	steps := config.ExpandCalls(job.Steps, wf.Functions, wf.Keys, func(v string) string {
 		return config.ExpandVars(v, staticBase)
 	})
 

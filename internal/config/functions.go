@@ -11,8 +11,10 @@ import (
 // validateSteps validates an ordered step list (a job's steps or a function's
 // body) and returns any problems. ctx labels the owner for messages (e.g.
 // `job "a"` or `function "f"`). fns is the resolved function set used to check
-// `call:` references; allowCalls is false for function bodies (no nesting).
-func validateSteps(ctx string, steps []*Step, fns map[string]*Function, allowCalls bool) []string {
+// `call:` references; keys is the resolved key set (fetched functions, keyed
+// by verbatim uses string) used to check `uses:` references; allowInvokes is
+// false for function and key bodies (no nesting).
+func validateSteps(ctx string, steps []*Step, fns, keys map[string]*Function, allowInvokes bool) []string {
 	var errs []string
 	chainOpen := false // a preceding if/elif a following elif/else can attach to
 	for i, step := range steps {
@@ -22,14 +24,26 @@ func validateSteps(ctx string, steps []*Step, fns map[string]*Function, allowCal
 			continue
 		}
 		isCall := step.Call != ""
+		isUses := step.Uses != ""
 		hasRun := strings.TrimSpace(step.Run) != ""
 
 		if isCall && hasRun {
 			errs = append(errs, fmt.Sprintf("%s: step %d has both 'run' and 'call'", ctx, n))
 		}
+		if isUses && hasRun {
+			errs = append(errs, fmt.Sprintf("%s: step %d has both 'run' and 'uses'", ctx, n))
+		}
+		if isCall && isUses {
+			errs = append(errs, fmt.Sprintf("%s: step %d has both 'call' and 'uses'", ctx, n))
+		}
 		if isCall {
-			errs = append(errs, validateCall(ctx, n, step, fns, allowCalls)...)
+			errs = append(errs, validateCall(ctx, n, step, fns, allowInvokes)...)
 			chainOpen = false // a call is not part of a conditional chain
+			continue
+		}
+		if isUses {
+			errs = append(errs, validateUses(ctx, n, step, keys, allowInvokes)...)
+			chainOpen = false // a uses step is not part of a conditional chain
 			continue
 		}
 		if !hasRun {
@@ -89,15 +103,40 @@ func validateCall(ctx string, n int, step *Step, fns map[string]*Function, allow
 		errs = append(errs, fmt.Sprintf("%s: step %d calls unknown function %q", ctx, n, step.Call))
 		return errs
 	}
+	return append(errs, validateWith(ctx, n, "function", step.Call, fn, step.With)...)
+}
+
+func validateUses(ctx string, n int, step *Step, keys map[string]*Function, allowUses bool) []string {
+	var errs []string
+	if !allowUses {
+		errs = append(errs, fmt.Sprintf("%s: step %d uses %q: a function cannot use a key", ctx, n, step.Uses))
+	}
+	if step.If != "" || step.Elif != "" || step.Else {
+		errs = append(errs, fmt.Sprintf("%s: step %d: a uses step cannot have if/elif/else", ctx, n))
+	}
+	fn := keys[step.Uses]
+	if fn == nil {
+		errs = append(errs, fmt.Sprintf("%s: step %d: key %q not resolved", ctx, n, step.Uses))
+		return errs
+	}
+	return append(errs, validateWith(ctx, n, "key", step.Uses, fn, step.With)...)
+}
+
+// validateWith checks a call/uses step's `with:` map against the invoked
+// function's declared inputs: every with key must be a declared input, and
+// every required input must be provided. kind labels messages ("function" or
+// "key"); name is the function name or verbatim uses string.
+func validateWith(ctx string, n int, kind, name string, fn *Function, with map[string]string) []string {
+	var errs []string
 	// `with` keys must be declared inputs.
-	wkeys := make([]string, 0, len(step.With))
-	for k := range step.With {
+	wkeys := make([]string, 0, len(with))
+	for k := range with {
 		wkeys = append(wkeys, k)
 	}
 	sort.Strings(wkeys)
 	for _, k := range wkeys {
 		if fn.Inputs[k] == nil {
-			errs = append(errs, fmt.Sprintf("%s: step %d: %q is not an input of function %q", ctx, n, k, step.Call))
+			errs = append(errs, fmt.Sprintf("%s: step %d: %q is not an input of %s %q", ctx, n, k, kind, name))
 		}
 	}
 	// Required inputs must be provided.
@@ -108,8 +147,8 @@ func validateCall(ctx string, n int, step *Step, fns map[string]*Function, allow
 	sort.Strings(inkeys)
 	for _, in := range inkeys {
 		if fn.Inputs[in].Required {
-			if _, ok := step.With[in]; !ok {
-				errs = append(errs, fmt.Sprintf("%s: step %d: function %q requires input %q", ctx, n, step.Call, in))
+			if _, ok := with[in]; !ok {
+				errs = append(errs, fmt.Sprintf("%s: step %d: %s %q requires input %q", ctx, n, kind, name, in))
 			}
 		}
 	}
@@ -134,18 +173,24 @@ func MergeFunctions(global, local map[string]*Function) map[string]*Function {
 }
 
 // ExpandCalls returns steps with every `call:` step replaced by the called
-// function's steps. expand is applied to each input value (the call's `with:`
-// value, or the input's default) so inputs may reference the caller's env;
-// inputs are injected as env vars below each function step's own env. Assumes
-// the workflow validated, so every call resolves.
-func ExpandCalls(steps []*Step, fns map[string]*Function, expand func(string) string) []*Step {
+// function's steps and every `uses:` step replaced by the resolved key's
+// steps. expand is applied to each input value (the step's `with:` value, or
+// the input's default) so inputs may reference the caller's env; inputs are
+// injected as env vars below each function step's own env. Assumes the
+// workflow validated, so every call and key resolves.
+func ExpandCalls(steps []*Step, fns, keys map[string]*Function, expand func(string) string) []*Step {
 	out := make([]*Step, 0, len(steps))
 	for _, step := range steps {
-		if step.Call == "" {
+		var fn *Function
+		switch {
+		case step.Call != "":
+			fn = fns[step.Call]
+		case step.Uses != "":
+			fn = keys[step.Uses]
+		default:
 			out = append(out, step)
 			continue
 		}
-		fn := fns[step.Call]
 		if fn == nil { // defensive; validation should have caught it
 			continue
 		}
