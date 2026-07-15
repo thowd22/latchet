@@ -86,13 +86,17 @@ func TestValidate(t *testing.T) {
 func TestApplyEnvDefaultsRespectsExisting(t *testing.T) {
 	t.Setenv("LATCHET_RUNTIME", "docker") // already set -> must win
 	t.Setenv("LATCHET_WORKSPACE_ROOT", "")
-	c := &Config{Runtime: "podman", WorkspaceRoot: "/from/config"}
+	t.Setenv("LATCHET_CACHE_ROOT", "")
+	c := &Config{Runtime: "podman", WorkspaceRoot: "/from/config", CacheRoot: "/cache/from/config"}
 	c.ApplyEnvDefaults()
 	if os.Getenv("LATCHET_RUNTIME") != "docker" {
 		t.Errorf("existing env var must win, got %q", os.Getenv("LATCHET_RUNTIME"))
 	}
 	if os.Getenv("LATCHET_WORKSPACE_ROOT") != "/from/config" {
 		t.Errorf("unset var should take config value, got %q", os.Getenv("LATCHET_WORKSPACE_ROOT"))
+	}
+	if os.Getenv("LATCHET_CACHE_ROOT") != "/cache/from/config" {
+		t.Errorf("cache_root should flow to LATCHET_CACHE_ROOT, got %q", os.Getenv("LATCHET_CACHE_ROOT"))
 	}
 }
 
