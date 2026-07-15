@@ -82,7 +82,9 @@ hermetically.
 `LATCHET_LOG_DIR`, `LATCHET_COSIGN_KEY`, `LATCHET_COSIGN_TLOG`,
 `LATCHET_DETERMINISTIC`, `LATCHET_CONFIG` (global `latchet-ci.yml` path),
 `LATCHET_WATCH_STATE` (`latchet watch` state file), `LATCHET_KEYS_CACHE`
-(fetched-keys cache dir). Distinct from
+(fetched-keys cache dir), `LATCHET_CACHE_ROOT` (persistent job cache for
+`cache: true` jobs, mounted at `/cache` and injected as `LATCHET_CACHE`).
+Distinct from
 the output-only `LATCHET_*` vars `builtinenv` *injects* into steps
 (`LATCHET_WORKSPACE`, `LATCHET_RUN_ID`, `LATCHET_JOB_ID`, `LATCHET_GIT_*`).
 

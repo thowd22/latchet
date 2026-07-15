@@ -194,13 +194,14 @@ common build/publish behavior inline. `checkout` shipped first; seeds below
   job to proceed past a failed step.
 - **Configurable `shell:`** — v1 hardcodes `sh -c`; allow `bash` etc. per
   job/step.
-- **Shared dependency cache mount** — a persistent, cross-job cache directory
-  bind-mounted into each container (e.g. Go module cache, npm, pip) so jobs
-  don't re-download dependencies every run. Today each job starts with an
-  empty `/workspace` and no shared cache; `inherit:` hands files to a single
-  child but is not a general cache. Needs a design pass: cache location
-  per language/runtime, key/scope, and concurrent-write safety across
-  parallel jobs.
+- ~~**Shared dependency cache mount**~~ — **shipped** (`cache: true` on a
+  job or workflow; `internal/workspace.CacheRoot`). A persistent host dir
+  (`LATCHET_CACHE_ROOT` → global config `cache_root:` →
+  `~/.cache/latchet/jobcache`) bind-mounted at `/cache` and injected as
+  `LATCHET_CACHE`. Concurrent-write safety is delegated to writers
+  (stage-and-rename) — the `cache/restore`/`cache/save` keys implement
+  actions/cache-style keyed tarballs on top. Still open: retention/GC of
+  the cache dir (pairs with the workspace retention sweeper).
 - ~~**Built-in pipeline env vars**~~ — **shipped** (`internal/builtinenv`).
   Values latchet injects into every step
   automatically, before user-defined `env:` merges on top (so they can be

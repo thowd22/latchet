@@ -615,6 +615,37 @@ as an infra error. Single-parent only — multi-parent merge semantics and
 named-artifact upload/download (`actions/upload-artifact`-style) are
 deferred (see ROADMAP).
 
+## Persistent job cache (`cache: true`)
+
+A job (or the whole workflow) may declare `cache: true` to bind-mount a
+**persistent host directory** at `/cache` in the job's container, injected as
+`$LATCHET_CACHE`. Unlike `/workspace` it survives across runs — dependency
+caches (Go modules, npm, pip, …) warmed in one run are there in the next.
+
+```yaml
+jobs:
+  build:
+    container: golang:1.22
+    cache: true
+    steps:
+      - run: GOMODCACHE=$LATCHET_CACHE/gomod go build ./...
+```
+
+- Host location: `LATCHET_CACHE_ROOT` env var → global config `cache_root:` →
+  default `~/.cache/latchet/jobcache`. Jobs without `cache: true` don't get
+  the mount (and `$LATCHET_CACHE` is unset).
+- The cache is **shared by all caching jobs on the machine**, including
+  parallel ones — writers should stage-and-rename. The
+  [`cache/restore` and `cache/save` keys](#keys-fetched-reusable-steps) do
+  this for you, actions/cache-style.
+- Like `deterministic:`, a workflow-level `cache: true` applies to every job
+  and a job cannot opt out.
+- latchet never cleans the cache. Remove it manually (`rm -rf`, or
+  `podman unshare rm -rf ~/.cache/latchet/jobcache` if container-owned files
+  resist).
+- `latchet verify` re-runs share the mount — keep cache contents out of your
+  build *outputs* or verification may diverge.
+
 ## Container runtime
 
 `latchet` shells out to `docker` or `podman` (auto-detected; `docker`
@@ -628,6 +659,7 @@ preferred). Override with `LATCHET_RUNTIME=podman`.
 | `LATCHET_WORKSPACE_ROOT` | where run workspaces are created (default `<tmp>/latchet`) |
 | `LATCHET_KEEP_WORKSPACE=1` | keep the workspace even on success |
 | `LATCHET_LOG_DIR` | base directory for log files (default per XDG / `~/.local/state/latchet`) |
+| `LATCHET_CACHE_ROOT` | host directory for the [persistent job cache](#persistent-job-cache-cache-true) (default `~/.cache/latchet/jobcache`) |
 | `LATCHET_COSIGN_KEY` | path to a cosign private key; when set (and `cosign` is on `PATH`), the run's `provenance.json` is signed (see [Provenance](#provenance-slsa)) |
 | `LATCHET_COSIGN_TLOG=1` | also upload the signature to a Rekor transparency log (off by default, so signing works offline) |
 | `LATCHET_DETERMINISTIC=1` | force the [determinism helpers](#reproducible-builds-determinism-helpers) on for every job |
@@ -649,6 +681,7 @@ latchet behaves exactly as without it. It is loaded from the first of:
 runtime: podman                 # preferred container runtime
 workspace_root: /var/lib/latchet/ws
 log_dir: /var/log/latchet
+cache_root: /var/cache/latchet  # persistent job cache (jobs with cache: true)
 max_parallel: 4                 # default job concurrency
 location: server                # injected as LATCHET_LOCATION (default "local")
 env:                            # default env merged into every run
@@ -700,11 +733,9 @@ appeared or moved, it clones that commit and runs the repo's `latchet.yml`.
 
 ## Limitations
 
-- **No dependency cache between jobs.** Each job runs in its own container
-  with a fresh `/workspace`, so package/build caches (Go modules, npm,
-  pip, …) are not shared — every job re-downloads its dependencies. Warm a
-  cache within a single job, or hand artifacts to a child job with
-  `inherit:`. A shared cache mount is on the [roadmap](ROADMAP.md).
+- **Dependency caching is opt-in.** Jobs start with a fresh `/workspace`;
+  declare `cache: true` to share the [persistent job
+  cache](#persistent-job-cache-cache-true) across runs and jobs.
 - **No implicit checkout** — use the `checkout` key or clone your repo
   yourself (see [Checking out your code](#checking-out-your-code)).
 
@@ -723,7 +754,8 @@ feature:
   [`output-demo.yml`](ci/output-demo.yml),
   [`crossjob-demo.yml`](ci/crossjob-demo.yml),
   [`secret-demo.yml`](ci/secret-demo.yml),
-  [`keys-demo.yml`](ci/keys-demo.yml) — single-feature demos
+  [`keys-demo.yml`](ci/keys-demo.yml),
+  [`cache-demo.yml`](ci/cache-demo.yml) — single-feature demos
 - [`runtests.sh`](ci/runtests.sh) — the feature test harness (run on a host with
   a container runtime)
 

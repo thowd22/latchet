@@ -1,0 +1,36 @@
+# Demo: the persistent job cache.
+#
+# `cache: true` bind-mounts a host directory (LATCHET_CACHE_ROOT, default
+# ~/.cache/latchet/jobcache) at /cache in the job's container, injected as
+# $LATCHET_CACHE. It persists across runs — run this twice and the second run
+# hits the cache. Jobs without cache: true don't get the mount.
+#
+#   ./latchet -file ci/cache-demo.yml
+name: cache-demo
+jobs:
+  warm:
+    container: alpine:3.19
+    cache: true
+    steps:
+      - name: populate or hit
+        run: |
+          if [ -f "$LATCHET_CACHE/demo-stamp" ]; then
+            echo "cache hit: $(cat "$LATCHET_CACHE/demo-stamp")"
+          else
+            echo "cache miss: populating"
+            echo "warmed-by-run-$LATCHET_RUN_ID" > "$LATCHET_CACHE/demo-stamp"
+          fi
+  use:
+    container: alpine:3.19
+    cache: true
+    needs: warm
+    steps:
+      - name: read shared cache
+        run: cat "$LATCHET_CACHE/demo-stamp"
+  nocache:
+    container: alpine:3.19
+    steps:
+      - name: no mount without cache true
+        run: |
+          [ -z "$LATCHET_CACHE" ] && echo "LATCHET_CACHE empty as expected"
+          [ ! -d /cache ] && echo "/cache not mounted as expected" || true

@@ -303,6 +303,16 @@ echo "===== -max-parallel 1 (live streaming to stdout) ====="
 LATCHET_LOG_DIR="$TMP/l2" "$LATCHET" -file ci/features.yml -max-parallel 1 >"$TMP/serial" 2>&1
 has "serial mode streams step output to stdout" "$TMP/serial" "WS=/workspace"
 
+echo "===== JOB CACHE (cache: true -> persistent /cache) ====="
+JC="$TMP/jobcache"
+LATCHET_CACHE_ROOT="$JC" LATCHET_LOG_DIR="$TMP/c1" "$LATCHET" -file ci/cache-demo.yml >/dev/null 2>&1
+has "first run misses + populates"  "$TMP/c1/latest/warm.log"    "cache miss: populating"
+has "sibling job shares the cache"  "$TMP/c1/latest/use.log"     "warmed-by-run-"
+has "no mount without cache: true"  "$TMP/c1/latest/nocache.log" "LATCHET_CACHE empty as expected"
+LATCHET_CACHE_ROOT="$JC" LATCHET_LOG_DIR="$TMP/c2" "$LATCHET" -file ci/cache-demo.yml >/dev/null 2>&1
+has "second run hits the cache"     "$TMP/c2/latest/warm.log"    "cache hit:"
+[ -f "$JC/demo-stamp" ] && ok "cache root persists on the host" || bad "cache root persists on the host"
+
 echo
 echo "===== RESULT: $PASS passed, $FAIL failed ====="
 rm -rf "$TMP"
