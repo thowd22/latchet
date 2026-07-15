@@ -31,6 +31,28 @@ func rootDir() string {
 	return filepath.Join(os.TempDir(), "latchet")
 }
 
+// CacheRoot resolves and pre-creates the persistent job cache directory,
+// bind-mounted at /cache into jobs that declare `cache: true`. Resolution:
+// LATCHET_CACHE_ROOT (set directly or via the global config's cache_root),
+// else <user cache dir>/latchet/jobcache. Unlike run workspaces it is never
+// cleaned up — that is the point. World-writable because the container user
+// (rootless subuid mappings) may differ from the latchet user.
+func CacheRoot() (string, error) {
+	dir := os.Getenv("LATCHET_CACHE_ROOT")
+	if dir == "" {
+		base, err := os.UserCacheDir()
+		if err != nil {
+			return "", fmt.Errorf("resolving job cache root: %w", err)
+		}
+		dir = filepath.Join(base, "latchet", "jobcache")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("creating job cache root %s: %w", dir, err)
+	}
+	_ = os.Chmod(dir, 0o777)
+	return dir, nil
+}
+
 // New allocates a fresh run directory.
 func New() (*Run, error) {
 	suffix := make([]byte, 3)

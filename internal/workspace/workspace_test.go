@@ -13,6 +13,37 @@ func newRun(t *testing.T) *Run {
 	return &Run{ID: "test", Root: t.TempDir()}
 }
 
+func TestCacheRootEnvOverride(t *testing.T) {
+	want := filepath.Join(t.TempDir(), "jc")
+	t.Setenv("LATCHET_CACHE_ROOT", want)
+	got, err := CacheRoot()
+	if err != nil {
+		t.Fatalf("CacheRoot: %v", err)
+	}
+	if got != want {
+		t.Errorf("CacheRoot = %q, want %q", got, want)
+	}
+	if info, err := os.Stat(got); err != nil || !info.IsDir() {
+		t.Errorf("cache root not created: %v", err)
+	}
+}
+
+func TestCacheRootDefaultUnderUserCacheDir(t *testing.T) {
+	t.Setenv("LATCHET_CACHE_ROOT", "")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir()) // os.UserCacheDir honors this on linux
+	got, err := CacheRoot()
+	if err != nil {
+		t.Fatalf("CacheRoot: %v", err)
+	}
+	want := filepath.Join(os.Getenv("XDG_CACHE_HOME"), "latchet", "jobcache")
+	if got != want {
+		t.Errorf("CacheRoot = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(got); err != nil {
+		t.Errorf("cache root not created: %v", err)
+	}
+}
+
 func TestSeedCopiesFilesAndDirs(t *testing.T) {
 	r := newRun(t)
 	src, _ := r.JobDir("parent")
