@@ -243,16 +243,26 @@ func jobDeterministic(wf *config.Workflow, job *config.Job) bool {
 	return wf.Deterministic || job.Deterministic || os.Getenv("LATCHET_DETERMINISTIC") == "1"
 }
 
+// jobCache reports whether the persistent job cache is mounted for this job:
+// set workflow-wide or on the job.
+func jobCache(wf *config.Workflow, job *config.Job) bool {
+	return wf.Cache || job.Cache
+}
+
 // jobBuiltins builds the lowest-precedence env base for a job: the LATCHET_*
 // built-ins plus, when the job is deterministic, the determinism helpers
-// (SOURCE_DATE_EPOCH, LC_ALL, LANG, TZ). Used by both execution and provenance
-// so the recorded env matches what ran.
+// (SOURCE_DATE_EPOCH, LC_ALL, LANG, TZ), and, when the job caches,
+// LATCHET_CACHE. Used by both execution and provenance so the recorded env
+// matches what ran.
 func jobBuiltins(runID string, job *config.Job, wf *config.Workflow, git builtinenv.Git) map[string]string {
 	m := builtinenv.For(runID, job.ID, "/workspace", git)
 	if jobDeterministic(wf, job) {
 		for k, v := range builtinenv.Deterministic(git) {
 			m[k] = v
 		}
+	}
+	if jobCache(wf, job) {
+		m[builtinenv.CacheVar] = "/cache"
 	}
 	return m
 }
@@ -430,8 +440,18 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 		return scheduler.Result{ID: job.ID}, nil, err
 	}
 
+	// Jobs with cache: true additionally mount the persistent host job cache
+	// at /cache; it outlives runs by design.
+	cacheHost := ""
+	if jobCache(wf, job) {
+		var err error
+		if cacheHost, err = workspace.CacheRoot(); err != nil {
+			return scheduler.Result{ID: job.ID}, nil, err
+		}
+	}
+
 	container := containerName(ws.ID, job.ID)
-	if err := rt.Create(ctx, container, job.Container, jobDir, ""); err != nil {
+	if err := rt.Create(ctx, container, job.Container, jobDir, cacheHost); err != nil {
 		return scheduler.Result{ID: job.ID}, nil, err
 	}
 	defer rt.Remove(container)

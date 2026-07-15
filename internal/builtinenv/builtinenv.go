@@ -7,7 +7,7 @@
 // image-defined variables. These are output-only (injected into steps) and
 // are distinct from the LATCHET_* vars the binary *reads* to configure itself
 // (LATCHET_RUNTIME, LATCHET_WORKSPACE_ROOT, LATCHET_KEEP_WORKSPACE,
-// LATCHET_LOG_DIR), which are reserved on input.
+// LATCHET_LOG_DIR, LATCHET_CACHE_ROOT), which are reserved on input.
 package builtinenv
 
 import (
@@ -42,6 +42,11 @@ const (
 	// reads it after each step and merges the vars into later steps' env (step
 	// outputs). The path is fixed and host-readable via the workspace mount.
 	EnvFileVar = "LATCHET_ENV"
+
+	// CacheVar is the container-side path of the persistent job cache
+	// (/cache), injected only for jobs that declare `cache: true`. Empty /
+	// absent otherwise, so scripts can probe for it.
+	CacheVar = "LATCHET_CACHE"
 )
 
 // EnvFilePath is the container-side path of the step-output file, under the
