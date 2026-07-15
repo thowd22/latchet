@@ -431,7 +431,7 @@ func runJob(ctx context.Context, rt *runtime.Runtime, ws *workspace.Run, wf *con
 	}
 
 	container := containerName(ws.ID, job.ID)
-	if err := rt.Create(ctx, container, job.Container, jobDir); err != nil {
+	if err := rt.Create(ctx, container, job.Container, jobDir, ""); err != nil {
 		return scheduler.Result{ID: job.ID}, nil, err
 	}
 	defer rt.Remove(container)

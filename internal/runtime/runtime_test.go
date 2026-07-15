@@ -40,12 +40,29 @@ func TestTailWriterKeepsLastBytes(t *testing.T) {
 }
 
 func TestCreateArgs(t *testing.T) {
-	got := createArgs("latchet-run1-build", "alpine:3.19", "/tmp/latchet/run1/build")
+	got := createArgs("latchet-run1-build", "alpine:3.19", "/tmp/latchet/run1/build", "")
 	want := []string{
 		"create",
 		"--name", "latchet-run1-build",
 		"-w", "/workspace",
 		"-v", "/tmp/latchet/run1/build:/workspace",
+		"--entrypoint", "sh",
+		"alpine:3.19",
+		"-c", "sleep infinity",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("createArgs = %v, want %v", got, want)
+	}
+}
+
+func TestCreateArgsWithCache(t *testing.T) {
+	got := createArgs("latchet-run1-build", "alpine:3.19", "/tmp/latchet/run1/build", "/home/u/.cache/latchet/jobcache")
+	want := []string{
+		"create",
+		"--name", "latchet-run1-build",
+		"-w", "/workspace",
+		"-v", "/tmp/latchet/run1/build:/workspace",
+		"-v", "/home/u/.cache/latchet/jobcache:/cache",
 		"--entrypoint", "sh",
 		"alpine:3.19",
 		"-c", "sleep infinity",

@@ -55,17 +55,23 @@ func detect(override string, lookPath func(string) (string, bool)) (string, erro
 // without paying container startup cost again. The image's own entrypoint is
 // overridden: steps always run via exec, and an image whose ENTRYPOINT is a
 // tool (e.g. alpine/git) would otherwise swallow the keepalive command and
-// exit immediately.
-func createArgs(name, image, workspaceHost string) []string {
-	return []string{
+// exit immediately. cacheHost, when non-empty, is additionally bind-mounted
+// at /cache (the persistent job cache for `cache: true` jobs).
+func createArgs(name, image, workspaceHost, cacheHost string) []string {
+	args := []string{
 		"create",
 		"--name", name,
 		"-w", "/workspace",
 		"-v", workspaceHost + ":/workspace",
+	}
+	if cacheHost != "" {
+		args = append(args, "-v", cacheHost+":/cache")
+	}
+	return append(args,
 		"--entrypoint", "sh",
 		image,
 		"-c", "sleep infinity",
-	}
+	)
 }
 
 func startArgs(name string) []string { return []string{"start", name} }
@@ -157,8 +163,8 @@ func (w *tailWriter) Write(p []byte) (int, error) {
 func (w *tailWriter) String() string { return string(w.buf) }
 
 // Create creates and starts the long-lived container for a job.
-func (r *Runtime) Create(ctx context.Context, name, image, workspaceHost string) error {
-	if out, err := exec.CommandContext(ctx, r.Bin, createArgs(name, image, workspaceHost)...).CombinedOutput(); err != nil {
+func (r *Runtime) Create(ctx context.Context, name, image, workspaceHost, cacheHost string) error {
+	if out, err := exec.CommandContext(ctx, r.Bin, createArgs(name, image, workspaceHost, cacheHost)...).CombinedOutput(); err != nil {
 		return fmt.Errorf("creating container %s: %w\n%s", name, err, out)
 	}
 	if out, err := exec.CommandContext(ctx, r.Bin, startArgs(name)...).CombinedOutput(); err != nil {
