@@ -1,0 +1,29 @@
+# Demo: the cache/restore + cache/save keys (actions/cache-style keyed
+# caching over the persistent job cache). Runnable without credentials:
+#
+#   ./latchet -file ci/keys-cache-demo.yml
+#
+# Run it twice — the first run misses and saves, the second exact-hits.
+name: keys-cache-demo
+jobs:
+  build:
+    container: alpine:3.19
+    cache: true
+    steps:
+      - uses: git@github.com:thowd22/latchet-keys//cache/restore@v1
+        with:
+          path: /tmp/deps
+          key: demo-deps-v1
+          restore_prefixes: demo-deps-
+      - name: use or populate
+        run: |
+          echo "hit=$CACHE_HIT matched=$CACHE_MATCHED_KEY"
+          if [ "$CACHE_HIT" != "true" ]; then
+            echo "populating dependencies..."
+            mkdir -p /tmp/deps && echo cached-payload > /tmp/deps/dep.txt
+          fi
+          cat /tmp/deps/dep.txt
+      - uses: git@github.com:thowd22/latchet-keys//cache/save@v1
+        with:
+          path: /tmp/deps
+          key: demo-deps-v1

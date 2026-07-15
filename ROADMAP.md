@@ -58,72 +58,44 @@ versioned key (a `key.yml` at a subpath, tagged) so authors don't hand-roll
 common build/publish behavior inline. `checkout` shipped first; seeds below
 (signed OCI builds next):
 
-- **Signed OCI image build** *(prebuild action)* — build a container image
-  from a Dockerfile + context, push it to a registry, and `cosign attest` the
-  resulting image keyless (Fulcio/OIDC + Rekor), reusing the signing path
-  already shipped for releases (`internal/signer`,
-  `.github/workflows/release.yml`). This is what finally gives the
-  `cosign attest`/OCI signing deferred under
-  [Subsystem 3](#subsystem-3--sigstore-signing-small-once-cosign-is-on-the-host)
-  an artifact to sign — latchet does not build or push images today. Open
-  design: builder backend (`docker build` / `buildah` / BuildKit), registry
-  auth, and whether the image digest + attestation fold into the run's
-  `provenance.json` as a subject / resolvedDependency.
+- ~~**Signed OCI image build** *(prebuild action)*~~ — **shipped (key-based)**
+  as the `build-push` (rootless buildah: chroot isolation + vfs, digest
+  capture, registry login from secrets) + `sign` (cosign `--key
+  env://COSIGN_KEY`) keys, wired together via cross-job outputs (the
+  digest-pinned `IMAGE`). **Still open:** keyless `cosign attest`
+  (Fulcio/OIDC needs an identity local CI lacks — viable once a latchet run
+  executes inside GHA or similar), and folding the image digest into the
+  run's `provenance.json` as a subject / resolvedDependency.
 - ~~**Checkout** *(prebuild action)*~~ — **shipped** as the first key
   (`thowd22/latchet-keys//checkout@v1`): clones `LATCHET_GIT_URL` at
   `LATCHET_GIT_SHA` into `/workspace` (init + shallow fetch + FETCH_HEAD, so
   it works in a non-empty workspace; the job's container needs `git`).
-- **Dependency cache** *(prebuild action)* — restore/save a keyed cache
-  (Go modules, npm, pip, …); the step form of the
-  [shared cache mount](#workflow-features) item.
-- **Discover open PRs / MRs** *(prebuild action)* — query the host platform
-  for the repo's open pull/merge requests and expose them to the workflow
-  (number, source branch, head SHA, base branch, title, author, labels), so a
-  workflow can run checks against each. Design tenets, in latchet's idiom:
-  - **CLI adapters, no SDK.** Shell out to `gh pr list --json …` /
-    `glab mr list -F json` as **soft dependencies** (reusing the user's
-    existing `gh`/`glab` auth), instead of vendoring a GitHub/GitLab Go SDK —
-    preserves the one-dependency rule and stays provider-agnostic. Provider is
-    detected from the remote host (`github.com` → `gh`, `gitlab.*` → `glab`),
-    overridable; self-hosted instances supported via the CLIs' own config.
-  - **Output as data, not control flow.** Writes the PR/MR list as JSON to
-    `/workspace` (and/or [step outputs](#workflow-features), once those exist)
-    for downstream steps to consume. latchet has no token handling — auth lives
-    entirely in the CLI.
-  - **Pairs with fan-out.** Acting *per* PR/MR needs
-    [`strategy.matrix`](#workflow-features) or dynamic job generation (neither
-    exists yet), so discovery ships first and the per-PR fan-out follows.
-  - Complements `latchet watch` (Operational section), which is intentionally
-    branches/tags only — this is the opt-in building block toward the deferred
-    PR/MR-trigger story, without baking provider APIs into the core.
-- **AI build steps** *(prebuild actions)* — LLM-backed steps for the assistive
-  parts of a pipeline: review a diff, summarize a PR/MR (pairs with **Discover
-  open PRs / MRs** above), draft release notes / changelogs, triage test
-  failures, or generate docs. Shared design: input read from `/workspace` (the
-  diff, files), output written back to `/workspace`; the API key is provided
-  via a `secrets:` entry (now shipped), so it's injected into the step and
-  masked in logs and `provenance.json` rather than leaking. Unlike the
-  CLI-adapter action above, a
-  prebuilt action runs as its **own container image**, so it may bundle a
-  provider SDK internally without touching latchet's one-dependency rule. Three
-  flavors:
-  - **OpenAI-compatible** *(provider-agnostic)* — calls any
-    `/v1/chat/completions`-shaped endpoint via a configurable base URL + model
-    + API key, so one action serves OpenAI, Azure OpenAI, OpenRouter, Together,
-    and local/self-hosted servers (Ollama, vLLM, llama.cpp). The portable
+- ~~**Dependency cache** *(prebuild action)*~~ — **shipped** as the
+  `cache/restore` + `cache/save` keys (actions/cache-modeled: exact-hit
+  semantics, prefix fallback, immutable entries, atomic saves) on top of the
+  shipped [shared cache mount](#workflow-features).
+- ~~**Discover open PRs / MRs** *(prebuild action)*~~ — **shipped (GitHub)**
+  as the `prs` key, following the original tenets: CLI adapter (`gh pr list
+  --json …` with the user's token via `secrets:`, no SDK), output as data
+  (JSON to `/workspace` + `PR_COUNT`/`PRS_FILE` step outputs, consumable via
+  `inherit:` + job `if:`). **Still open:** a GitLab `glab` sibling key, and
+  per-PR fan-out (needs dynamic job generation — `strategy.matrix` is static).
+- ~~**AI build steps** *(prebuild actions)*~~ — **shipped** as the `ai` and
+  `claude` keys, per the shared design: prompt from `/workspace`
+  (`prompt_file:` — a diff, PR list, logs), response back to `/workspace`
+  (`RESPONSE_FILE` output; step outputs are single-line so content never
+  transits `$LATCHET_ENV`), API key via `secrets:` (masked in logs +
+  provenance — verified: a provider echoing the key in an error message gets
+  `***`). Two of the three planned flavors:
+  - `ai` — OpenAI-compatible `/v1/chat/completions` with configurable
+    `base_url` (OpenAI, OpenRouter, Together, Ollama, vLLM …). The portable
     default.
-  - **Claude (Anthropic)** *(provider-specific)* — uses the native Anthropic
-    **Messages API** (`ANTHROPIC_API_KEY`, official `anthropic-sdk-go`) so it
-    can reach Claude-specific capabilities the compatible shape can't express:
-    adaptive thinking + `effort`, the 1M-token context window, prompt caching,
-    vision / PDF input, structured outputs, and tool use. Defaults to the
-    latest, most capable model (`claude-opus-4-8`; also `claude-sonnet-4-6` /
-    `claude-haiku-4-5` / `claude-fable-5`), and can target the first-party API,
-    Amazon Bedrock, Google Vertex AI, or Microsoft Foundry.
-  - **ChatGPT (OpenAI)** *(provider-specific)* — uses OpenAI's native API
-    (Responses / Chat Completions, `OPENAI_API_KEY`) for OpenAI-specific
-    features beyond the portable `/v1/chat/completions` subset (native
-    structured outputs, function calling, the Responses API tool surface).
+  - `claude` — native Anthropic Messages API (curl): `claude-opus-4-8`
+    default, adaptive thinking, `effort` control, refusal/truncation
+    handling.
+  - **Still open:** a ChatGPT-native (Responses API) sibling; richer Claude
+    features (vision/PDF input, structured outputs, tool use) would want an
+    SDK-bundling image rather than curl.
 - _(more to come — SBOM generation (`syft`), artifact upload/download, etc.)_
 
 - ~~**Parallel job execution**~~ — **shipped** (v0.2.0). Jobs whose `needs` are
@@ -662,11 +634,16 @@ Done so far (cont.):
     tags/SHAs, SHA-cached, recorded in provenance, re-pinned by
     `latchet verify`.
 
+Done so far (cont.):
+17. ~~**Keys catalog v1.1 + job cache**~~ — shipped: the persistent job
+    cache mount (`cache: true`) plus six keys — `cache/restore`,
+    `cache/save`, `build-push` (buildah), `sign` (cosign), `prs` (gh),
+    `ai` + `claude` — modeled on their GitHub Actions counterparts.
+
 Next picks (in rough order of value-per-effort):
-1. **Grow the keys catalog** (`latchet-keys`): signed OCI image build,
-   dependency cache, discover open PRs/MRs, AI build steps — credential-taking
-   keys are unblocked by secret masking. Per-key `container:` in the engine
-   would let a key bundle its own toolchain.
+1. **Per-key `container:`** — let a key bundle its own toolchain instead of
+   documenting image requirements; unlocks richer keys (SDK-based AI steps,
+   glab, syft SBOMs).
 2. **Self-update (`latchet update`) + new-release notifications** — designed
    above; dogfoods the release supply chain.
 

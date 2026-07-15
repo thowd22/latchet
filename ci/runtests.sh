@@ -313,6 +313,35 @@ LATCHET_CACHE_ROOT="$JC" LATCHET_LOG_DIR="$TMP/c2" "$LATCHET" -file ci/cache-dem
 has "second run hits the cache"     "$TMP/c2/latest/warm.log"    "cache hit:"
 [ -f "$JC/demo-stamp" ] && ok "cache root persists on the host" || bad "cache root persists on the host"
 
+echo "===== KEYS: cache/restore + cache/save (fetches from github) ====="
+KJC="$TMP/keys-jobcache"
+LATCHET_CACHE_ROOT="$KJC" LATCHET_LOG_DIR="$TMP/k1" "$LATCHET" -file ci/keys-cache-demo.yml >/dev/null 2>&1
+has "keys: first run misses"        "$TMP/k1/latest/build.log" "hit=false"
+has "keys: first run saves"         "$TMP/k1/latest/build.log" "cache/save: saved 'demo-deps-v1'"
+LATCHET_CACHE_ROOT="$KJC" LATCHET_LOG_DIR="$TMP/k2" "$LATCHET" -file ci/keys-cache-demo.yml >/dev/null 2>&1
+has "keys: second run exact-hits"   "$TMP/k2/latest/build.log" "hit=true matched=demo-deps-v1"
+has "keys: second save is a no-op"  "$TMP/k2/latest/build.log" "already cached, skipping"
+
+echo "===== KEYS: claude (gated on ANTHROPIC_API_KEY) ====="
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  cat > "$TMP/claude-e2e.yml" <<'YML'
+name: claude-e2e
+secrets: [ANTHROPIC_API_KEY]
+jobs:
+  a:
+    container: docker.io/badouralix/curl-jq
+    steps:
+      - uses: git@github.com:thowd22/latchet-keys//claude@v1
+        with: { prompt: "Reply with exactly the word pong.", max_tokens: "64" }
+      - run: cat claude-response.md
+YML
+  ec "claude key e2e -> exit 0" 0 env LATCHET_LOG_DIR="$TMP/cl" "$LATCHET" -file "$TMP/claude-e2e.yml"
+  has "claude: response file written" "$TMP/cl/latest/a.log" "RESPONSE_FILE=claude-response.md" || true
+  grep -qi "pong" "$TMP/cl/latest/a.log" && ok "claude: model replied" || bad "claude: model replied"
+else
+  echo "SKIP  claude key e2e (ANTHROPIC_API_KEY not set)"
+fi
+
 echo
 echo "===== RESULT: $PASS passed, $FAIL failed ====="
 rm -rf "$TMP"

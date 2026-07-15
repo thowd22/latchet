@@ -520,9 +520,13 @@ jobs:
 ```
 
 The official catalog lives at
-[thowd22/latchet-keys](https://github.com/thowd22/latchet-keys) — starting
-with `checkout`, which clones the triggering repo/commit into `/workspace`
-(the job's container needs `git`, e.g. `alpine/git`).
+[thowd22/latchet-keys](https://github.com/thowd22/latchet-keys):
+`checkout`, `cache/restore` + `cache/save` (actions/cache-style keyed
+caching), `build-push` (rootless buildah), `sign` (cosign), `prs` (PR
+discovery via gh), and `ai` / `claude` (LLM build steps). Each key's README
+documents its inputs, required image tools, and secrets. See
+[`ci/keys-pipeline-demo.yml`](ci/keys-pipeline-demo.yml) for them working
+together.
 
 How it works:
 
@@ -755,7 +759,11 @@ feature:
   [`crossjob-demo.yml`](ci/crossjob-demo.yml),
   [`secret-demo.yml`](ci/secret-demo.yml),
   [`keys-demo.yml`](ci/keys-demo.yml),
-  [`cache-demo.yml`](ci/cache-demo.yml) — single-feature demos
+  [`cache-demo.yml`](ci/cache-demo.yml),
+  [`keys-cache-demo.yml`](ci/keys-cache-demo.yml) — single-feature demos
+- [`keys-pipeline-demo.yml`](ci/keys-pipeline-demo.yml) — the full keys
+  pipeline (buildah **build → cosign sign → PR discovery → Claude review**);
+  needs real credentials, kept as reference
 - [`runtests.sh`](ci/runtests.sh) — the feature test harness (run on a host with
   a container runtime)
 

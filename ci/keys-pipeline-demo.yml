@@ -1,0 +1,55 @@
+# Demo (documentation): a full keys pipeline — build an image with buildah,
+# sign it with cosign, and have Claude review the open PRs. NEEDS REAL
+# CREDENTIALS, so this file is reference material rather than a smoke test:
+#
+#   REGISTRY_USERNAME=me REGISTRY_PASSWORD=... \
+#   COSIGN_KEY="$(cat cosign.key)" COSIGN_PASSWORD=... \
+#   GH_TOKEN="$(gh auth token)" ANTHROPIC_API_KEY=sk-ant-... \
+#   ./latchet -file ci/keys-pipeline-demo.yml
+#
+# Each credential is declared under secrets:, so latchet injects it from the
+# host env and masks it in logs and provenance.json.
+name: keys-pipeline
+jobs:
+  image:
+    container: quay.io/buildah/stable
+    secrets: [REGISTRY_USERNAME, REGISTRY_PASSWORD]
+    outputs: [IMAGE, IMAGE_DIGEST] # digest-pinned ref crosses to dependents
+    steps:
+      - uses: git@github.com:thowd22/latchet-keys//checkout@v1
+        with: { url: https://github.com/thowd22/latchet.git }
+      - uses: git@github.com:thowd22/latchet-keys//build-push@v1
+        with:
+          tags: ghcr.io/thowd22/latchet-demo:$LATCHET_GIT_SHA
+          file: Dockerfile
+
+  sign:
+    container: docker.io/bitnami/cosign
+    needs: image
+    secrets: [COSIGN_KEY, COSIGN_PASSWORD, REGISTRY_USERNAME, REGISTRY_PASSWORD]
+    steps:
+      - uses: git@github.com:thowd22/latchet-keys//sign@v1
+        with:
+          image: $IMAGE # injected from the image job's outputs
+
+  prs:
+    container: docker.io/maniator/gh
+    secrets: [GH_TOKEN]
+    outputs: [PR_COUNT]
+    steps:
+      - uses: git@github.com:thowd22/latchet-keys//prs@v1
+        with: { repo: thowd22/latchet }
+
+  review:
+    container: docker.io/badouralix/curl-jq
+    needs: prs
+    inherit: prs # brings prs.json into this job's workspace
+    if: $PR_COUNT != 0
+    secrets: [ANTHROPIC_API_KEY]
+    steps:
+      - uses: git@github.com:thowd22/latchet-keys//claude@v1
+        with:
+          system_prompt: You triage pull requests. One line per PR, flag anything risky.
+          prompt_file: prs.json
+          effort: medium
+      - run: cat claude-response.md
