@@ -31,6 +31,11 @@ type Workflow struct {
 	// (inject SOURCE_DATE_EPOCH, LC_ALL=C, LANG=C, TZ=UTC). A job may also set
 	// it individually; LATCHET_DETERMINISTIC=1 forces it on globally.
 	Deterministic bool `yaml:"deterministic"`
+	// Cache, when true, bind-mounts the persistent host job cache at /cache
+	// in every job's container (injected as LATCHET_CACHE). A job may also
+	// set it individually; like Deterministic, a job cannot opt out of a
+	// workflow-level true.
+	Cache bool `yaml:"cache"`
 	// Secrets names host environment variables whose values are injected into
 	// every job's steps and masked in logs and provenance. A job may declare
 	// its own; the two lists are unioned per job.
@@ -46,6 +51,7 @@ type Job struct {
 	Inherit       string            `yaml:"inherit"` // name a single parent whose /workspace is copied in before this job runs; must also appear in needs
 	Steps         []*Step           `yaml:"steps"`
 	Deterministic bool              `yaml:"deterministic"` // apply determinism helpers to this job
+	Cache         bool              `yaml:"cache"`         // bind-mount the persistent host job cache at /cache
 	Secrets       []string          `yaml:"secrets"`       // host env var names injected + masked for this job
 	Outputs       []string          `yaml:"outputs"`       // env var names (set via $LATCHET_ENV) exported to needs-dependents
 	If            string            `yaml:"if"`            // condition; the whole job is skipped when false (cond syntax)

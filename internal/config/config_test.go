@@ -51,6 +51,19 @@ jobs:
 	}
 }
 
+func TestLoadCacheFlag(t *testing.T) {
+	wf, err := Load(write(t, "cache: true\njobs:\n  a:\n    container: x\n    cache: true\n    steps: [{run: echo}]\n  b:\n    container: x\n    steps: [{run: echo}]\n"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !wf.Cache {
+		t.Errorf("workflow-level cache not parsed")
+	}
+	if !wf.Jobs["a"].Cache || wf.Jobs["b"].Cache {
+		t.Errorf("job-level cache wrong: a=%v b=%v", wf.Jobs["a"].Cache, wf.Jobs["b"].Cache)
+	}
+}
+
 func TestNeedsScalarAndList(t *testing.T) {
 	wf, err := Load(write(t, `
 jobs:

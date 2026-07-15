@@ -7,7 +7,7 @@ import (
 )
 
 func TestExpandMatrixCartesianAndNeeds(t *testing.T) {
-	wf := &Workflow{Jobs: map[string]*Job{
+	wf := &Workflow{Cache: true, Jobs: map[string]*Job{
 		"test": {
 			ID:        "test",
 			Container: "golang:${go}",
@@ -44,6 +44,10 @@ func TestExpandMatrixCartesianAndNeeds(t *testing.T) {
 	// matrix vars are injected as env.
 	if env := out.Jobs["test (go=1.22, os=linux)"].Env; env["go"] != "1.22" || env["os"] != "linux" {
 		t.Errorf("matrix env wrong: %v", env)
+	}
+	// workflow-level flags survive the rebuild.
+	if !out.Cache {
+		t.Errorf("workflow Cache lost in expansion")
 	}
 	// report's needs now points at both expansions.
 	got := []string(out.Jobs["report"].Needs)

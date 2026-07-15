@@ -31,6 +31,7 @@ func ExpandMatrix(wf *Workflow) *Workflow {
 		Name:          wf.Name,
 		Env:           wf.Env,
 		Deterministic: wf.Deterministic,
+		Cache:         wf.Cache,
 		Secrets:       wf.Secrets,
 		Functions:     wf.Functions,
 		Keys:          wf.Keys,
